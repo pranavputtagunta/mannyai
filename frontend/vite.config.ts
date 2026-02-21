@@ -1,15 +1,16 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 
 export default defineConfig({
+  envDir: "../", // Point to the directory containing the .env file
   plugins: [react()],
   server: {
     proxy: {
       // Any request starting with /onshape-proxy gets intercepted
-      '/onshape-proxy': {
-        target: 'https://cad.onshape.com',
+      "/onshape-proxy": {
+        target: "https://cad.onshape.com",
         changeOrigin: true, // This is the magic line that spoofs the CORS header
-        rewrite: (path) => path.replace(/^\/onshape-proxy/, ''),
+        rewrite: (path) => path.replace(/^\/onshape-proxy/, ""),
       },
     },
   },
