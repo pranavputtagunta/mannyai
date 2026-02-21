@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from src.services.onshape_api import onshape_client
+from services.onshape_api import onshape_client
 
 router = APIRouter()
 

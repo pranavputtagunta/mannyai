@@ -7,7 +7,7 @@ import requests
 import string
 import random
 from datetime import datetime
-from src.core.config import settings
+from core.config import settings
 
 class OnshapeAPI:
     def __init__(self):
@@ -55,6 +55,7 @@ class OnshapeAPI:
         """
         path = f"/api/partstudios/d/{did}/w/{wid}/e/{eid}/gltf"
         url = self.base_url + path
+        print("API KEY" + settings.ONSHAPE_SECRET_KEY)
         
         headers = self._make_auth_headers('GET', path)
         # For GLTF export, we might want to accept the specific format
