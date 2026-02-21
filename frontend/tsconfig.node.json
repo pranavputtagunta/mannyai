@@ -4,9 +4,10 @@
     "target": "ES2023",
     "lib": ["ES2023"],
     "module": "ESNext",
-    "types": ["node"],
-    "skipLibCheck": true,
-
+    "types": ["node", "@react-three/fiber"],
+    "skipLibCheck": true,  
+    "jsx": "react-jsx",
+    
     /* Bundler mode */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
