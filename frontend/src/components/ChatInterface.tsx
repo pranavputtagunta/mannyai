@@ -12,9 +12,7 @@ interface Message {
   text: string;
 }
 
-export default function ChatInterface({
-  isLoading,
-}: ChatInterfaceProps): JSX.Element {
+export default function ChatInterface({ isLoading }: ChatInterfaceProps) {
   const [input, setInput] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([
     {

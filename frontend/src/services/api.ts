@@ -48,3 +48,22 @@ export const sendCopilotPrompt = async (
     throw error;
   }
 };
+
+export const saveUseCase = async (useCase: string): Promise<void> => {
+  try {
+    await axios.post(`${BACKEND_URL}/use-case`, { use_case: useCase });
+  } catch (error) {
+    console.error("Failed to save use case:", error);
+    throw error;
+  }
+};
+
+export const loadUseCase = async (): Promise<string> => {
+  try {
+    const response = await axios.get(`${BACKEND_URL}/use-case`);
+    return response.data.use_case;
+  } catch (error) {
+    console.error("Failed to load use case:", error);
+    throw error;
+  }
+};

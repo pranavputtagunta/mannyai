@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api import endpoints_cad
+from api import endpoints_cad, endpoints_use_case
 
 app = FastAPI(
     title="AgentFix API",
@@ -19,6 +19,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(endpoints_cad.router, prefix="/api/cad", tags=["CAD"])
+app.include_router(endpoints_use_case.router, prefix="/api", tags=["Use Case"])
 
 @app.get("/")
 def read_root():

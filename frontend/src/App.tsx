@@ -1,10 +1,12 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import ChatInterface from "./components/ChatInterface";
 import Viewer3D from "./components/Viewer3D";
+import LinkEntry from "./components/LinkEntry";
+import UseCaseEntry from "./components/UseCaseEntry";
 import { fetchModelFromOnshape } from "./services/api";
 import "./App.css";
 
-export default function App(): JSX.Element {
+export default function App() {
   const [modelUrl, setModelUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
@@ -32,32 +34,8 @@ export default function App(): JSX.Element {
         <div className="sidebar-header">
           <h1 className="sidebar-title">AgentFix</h1>
           <p className="sidebar-subtitle">Universal CAD Surgeon</p>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const form = e.target as HTMLFormElement;
-              const input = form.elements.namedItem("url") as HTMLInputElement;
-              if (input.value.trim()) {
-                handleImport(input.value.trim());
-              }
-            }}
-            className="url-form"
-          >
-            <input
-              name="url"
-              type="text"
-              placeholder="Paste Onshape URL..."
-              className="url-input"
-              disabled={isLoading}
-            />
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="url-submit-btn"
-            >
-              Load
-            </button>
-          </form>
+          <LinkEntry isLoading={isLoading} onImport={handleImport} />
+          <UseCaseEntry />
         </div>
         <ChatInterface isLoading={isLoading} />
       </div>
