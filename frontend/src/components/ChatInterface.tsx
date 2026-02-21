@@ -4,7 +4,6 @@ import { sendCopilotPrompt } from "../services/api";
 import "../assets/ChatInterface.css";
 
 interface ChatInterfaceProps {
-  onImport: (url: string) => Promise<void>;
   isLoading: boolean;
 }
 
@@ -14,14 +13,13 @@ interface Message {
 }
 
 export default function ChatInterface({
-  onImport,
   isLoading,
 }: ChatInterfaceProps): JSX.Element {
   const [input, setInput] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      text: "Paste an Onshape URL to import a model, or click a broken face and tell me what to fix.",
+      text: "Click a broken face and tell me what to fix.",
     },
   ]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -30,24 +28,6 @@ export default function ChatInterface({
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!input.trim()) return;
-
-    if (input.includes("cad.onshape.com")) {
-      const url = input;
-      setMessages((prev) => [
-        ...prev,
-        { role: "user", text: `Importing: ${url}` },
-      ]);
-      setInput("");
-      await onImport(url);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          text: "Model imported successfully. What would you like to modify?",
-        },
-      ]);
-      return;
-    }
 
     const userMsg = input;
     setInput("");
@@ -116,7 +96,7 @@ export default function ChatInterface({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={isLoading || isProcessing}
-            placeholder="Paste link or type prompt..."
+            placeholder="Type prompt..."
             className="chat-input"
           />
           <button
