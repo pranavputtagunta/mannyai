@@ -17,6 +17,7 @@ class OnshapeAPI:
             "Accept": "model/gltf+json",
             "Content-Type": "application/json"
         }
+        print(f"auth: {self.auth}")  # Debug print to verify auth tuple
         
         response = requests.get(
             url,
@@ -27,8 +28,8 @@ class OnshapeAPI:
         response.raise_for_status()
         return response.json()
 
-    def execute_featurescript(self, did: str, wid: str, eid: str, script: str):
-        path = f"/api/partstudios/d/{did}/w/{wid}/e/{eid}/featurescript"
+    def execute_featurescript(self, did: str, wvm: str, wid: str, eid: str, script: str):
+        path = f"/api/partstudios/d/{did}/{wvm}/{wid}/e/{eid}/featurescript"
         url = self.base_url + path
         
         payload = {"script": script, "queries": []}
