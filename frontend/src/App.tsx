@@ -1,35 +1,60 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import React, { useState } from 'react';
+import ChatInterface from './components/ChatInterface';
+import Viewer3D from './components/Viewer3D';
+import { fetchModelFromOnshape } from './services/api';
+import './App.css';
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App(): JSX.Element {
+  const [modelUrl, setModelUrl] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+
+  /**
+   * Called by ChatInterface when a user pastes an Onshape URL
+   */
+  const handleImport = async (url: string): Promise<void> => {
+    setIsLoading(true);
+    try {
+      // Calls the proxy-enabled fetcher in api.ts
+      const objectUrl = await fetchModelFromOnshape(url); 
+      setModelUrl(objectUrl);
+      console.log("Model successfully loaded into blob URL:", objectUrl);
+    } catch (err) {
+      console.error("Import failed:", err);
+      alert("Failed to download model. Ensure your Vite proxy is running.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <div className="app-container">
+      <div className="sidebar">
+        <div className="sidebar-header">
+          <h1 className="sidebar-title">AgentFix</h1>
+          <p className="sidebar-subtitle">Universal CAD Surgeon</p>
+        </div>
+        {/* Pass the handleImport function as a prop */}
+        <ChatInterface onImport={handleImport} isLoading={isLoading} />
       </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
-}
 
-export default App
+      <div className="main-canvas">
+        {!modelUrl && !isLoading && (
+          <div className="overlay">
+            <p className="overlay-text">Paste an Onshape link to begin.</p>
+          </div>
+        )}
+        
+        {isLoading && (
+          <div className="overlay">
+             <div className="loader-group">
+                <div className="spinner"></div>
+                <p className="loading-text">Extracting Geometry...</p>
+             </div>
+          </div>
+        )}
+        
+        <Viewer3D modelUrl={modelUrl} />
+      </div>
+    </div>
+  );
+}
