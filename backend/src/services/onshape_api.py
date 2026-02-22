@@ -38,10 +38,19 @@ class OnshapeAPI:
             "variables": variables or {}
         }
 
-        headers = self._make_auth_headers("POST", path, content_type="application/json")
-        headers["Accept"] = "application/vnd.onshape.v1+json"
+        # 1. Manually set the headers (No more _make_auth_headers)
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/vnd.onshape.v1+json; charset=UTF-8;qs=0.1"
+        }
 
-        resp = requests.post(url, headers=headers, json=payload)
+        # 2. Pass auth=self.auth directly into the request just like you did for export_gltf
+        resp = requests.post(url, auth=self.auth, headers=headers, json=payload)
+        
+        # 3. Helpful debug print if it fails
+        if not resp.ok:
+            print(f"FeatureScript Error: {resp.text}")
+            
         resp.raise_for_status()
         return resp.json()
 

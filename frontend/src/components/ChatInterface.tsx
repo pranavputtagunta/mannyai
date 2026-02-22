@@ -1,10 +1,13 @@
+// frontend/src/components/ChatInterface.tsx
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { sendCopilotPrompt } from "../services/api";
+import { applyCadQueryFromText } from "../services/api";
 import "../assets/ChatInterface.css";
 
 interface ChatInterfaceProps {
   isLoading: boolean;
+  modelId: string | null;
+  onModelUpdated: (newGlbUrl: string) => void;
 }
 
 interface Message {
@@ -12,22 +15,37 @@ interface Message {
   text: string;
 }
 
+const BACKEND_BASE = "http://localhost:8000";
+
+function toAbsoluteUrl(maybeRelativeUrl: string): string {
+  // Handles both:
+  //  - "/api/cad/.../download/glb"
+  //  - "http://localhost:8000/api/cad/.../download/glb"
+  const u = new URL(maybeRelativeUrl, BACKEND_BASE);
+  // single cache-bust param (overwrite if exists)
+  u.searchParams.set("t", String(Date.now()));
+  return u.toString();
+}
+
 export default function ChatInterface({
   isLoading,
+  modelId,
+  onModelUpdated,
 }: ChatInterfaceProps): JSX.Element {
   const [input, setInput] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      text: "Click a broken face and tell me what to fix.",
-    },
+    { role: "assistant", text: "Upload a STEP file, then tell me what to change." },
   ]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
-  // We explicitly namespace React.FormEvent here to avoid the global DOM collision
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!input.trim()) return;
+
+    if (!modelId) {
+      setMessages((prev) => [...prev, { role: "assistant", text: "Upload a STEP file first." }]);
+      return;
+    }
 
     const userMsg = input;
     setInput("");
@@ -35,20 +53,24 @@ export default function ChatInterface({
     setIsProcessing(true);
 
     try {
-      const response = await sendCopilotPrompt(userMsg);
+      // AI mode: backend generates CadQuery, applies it, returns glb_url/step_url
+      const res = await applyCadQueryFromText(modelId, userMsg);
+
       setMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          text: response.message || "Modification applied.",
-        },
+        { role: "assistant", text: res.message || "Modification applied." },
       ]);
-    } catch (err) {
+
+      // ✅ FIX: turn whatever res.glb_url is into a clean absolute URL, and bust cache once
+      const glbUrl = toAbsoluteUrl(res.glb_url);
+      onModelUpdated(glbUrl);
+    } catch (err: any) {
+      console.error(err);
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          text: "Failed to apply modification. Please check constraints.",
+          text: err?.message || "Failed to apply modification. Check server logs for details.",
         },
       ]);
     } finally {
@@ -96,7 +118,7 @@ export default function ChatInterface({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={isLoading || isProcessing}
-            placeholder="Type prompt..."
+            placeholder="e.g. add a ball on top / scale 1.2 / cut a hole"
             className="chat-input"
           />
           <button
