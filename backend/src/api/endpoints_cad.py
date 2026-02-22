@@ -10,6 +10,8 @@ from pydantic import BaseModel
 import cadquery as cq
 import trimesh
 
+from services.timeline import get_timeline
+
 router = APIRouter()
 
 DATA_DIR = Path(os.environ.get("AGENTFIX_DATA_DIR", "./_agentfix_data")).resolve()
@@ -67,7 +69,7 @@ def _stl_to_glb(stl_path: Path, glb_path: Path) -> None:
 
         if isinstance(mesh, trimesh.Scene):
             mesh = trimesh.util.concatenate([g for g in mesh.geometry.values()])
-            
+
         glb_path.write_bytes(trimesh.exchange.gltf.export_glb(mesh))
     except Exception as e:
         raise HTTPException(500, f"Failed STL->GLB: {e}")
@@ -76,9 +78,12 @@ def _regen_preview(step_path: Path) -> None:
     model_dir = step_path.parent
     stl_path = model_dir / "preview.stl"
     glb_path = model_dir / "preview.glb"
+    preview_step_path = model_dir / "preview.step"
     wp = _load_step(step_path)
     _export_stl(wp, stl_path)
     _stl_to_glb(stl_path, glb_path)
+    # Also create preview.step for version control consistency
+    _export_step(wp, preview_step_path)
 
 def _apply_op(wp: cq.Workplane, req: ApplyOpRequest) -> cq.Workplane:
     if req.op == "translate":
@@ -145,6 +150,13 @@ async def upload_step(file: UploadFile = File(...)):
 
     _ = _load_step(step_path)
     _regen_preview(step_path)
+
+    # Initialize version history with initial commit
+    timeline = get_timeline(model_id, model_dir)
+    timeline.save_revision(
+        message="Initial upload",
+        files=["model.step", "preview.step", "preview.stl", "preview.glb"]
+    )
 
     MODELS[model_id] = step_path
     return {

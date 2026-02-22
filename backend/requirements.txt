@@ -8,3 +8,4 @@ cadquery
 trimesh
 python-multipart
 openai
+gitpython

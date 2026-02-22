@@ -7,6 +7,8 @@ import "../assets/ChatInterface.css";
 interface ChatInterfaceProps {
   isLoading: boolean;
   modelId: string | null;
+  viewingVersion?: number | null;
+  latestVersion?: number | null;
   onModelUpdated: (newGlbUrl: string) => void;
 }
 
@@ -30,20 +32,34 @@ function toAbsoluteUrl(maybeRelativeUrl: string): string {
 export default function ChatInterface({
   isLoading,
   modelId,
+  viewingVersion,
+  latestVersion,
   onModelUpdated,
 }: ChatInterfaceProps): JSX.Element {
   const [input, setInput] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([
-    { role: "assistant", text: "Upload a STEP file, then tell me what to change." },
+    {
+      role: "assistant",
+      text: "Upload a STEP file, then tell me what to change.",
+    },
   ]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+
+  // Determine if editing from a previous version (will cause truncation)
+  const isEditingFromPrevious =
+    viewingVersion != null &&
+    latestVersion != null &&
+    viewingVersion < latestVersion;
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!input.trim()) return;
 
     if (!modelId) {
-      setMessages((prev) => [...prev, { role: "assistant", text: "Upload a STEP file first." }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", text: "Upload a STEP file first." },
+      ]);
       return;
     }
 
@@ -54,7 +70,9 @@ export default function ChatInterface({
 
     try {
       // AI mode: backend generates CadQuery, applies it, returns glb_url/step_url
-      const res = await applyCadQueryFromText(modelId, userMsg);
+      // Pass from_version if editing from a previous version (triggers truncation)
+      const fromVersion = isEditingFromPrevious ? viewingVersion : undefined;
+      const res = await applyCadQueryFromText(modelId, userMsg, fromVersion);
 
       setMessages((prev) => [
         ...prev,
@@ -70,7 +88,9 @@ export default function ChatInterface({
         ...prev,
         {
           role: "assistant",
-          text: err?.message || "Failed to apply modification. Check server logs for details.",
+          text:
+            err?.message ||
+            "Failed to apply modification. Check server logs for details.",
         },
       ]);
     } finally {
