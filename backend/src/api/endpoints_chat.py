@@ -348,9 +348,9 @@ def _handle_help() -> str:
 **Tips**:
 • Be specific about sizes (use millimeters)
 • Mention locations (top, bottom, center, etc.)
-• Analysis questions will show a colored heatmap overlay
+• Analysis questions will show a colored heatmap overlay.
 
-What would you like to do?"""
+You break it, we fix it! What would you like to do?"""
 
 
 # ============== ANALYSIS/HEATMAP AGENT ==============
