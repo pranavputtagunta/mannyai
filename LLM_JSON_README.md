@@ -28,6 +28,59 @@ Use:
 - `payload.prompt` as user instruction
 - `payload.region_selection` as structured CAD context
 
+## Currently executable prompt patterns (deterministic)
+
+The backend now executes these directly from chat + selected JSON:
+
+- `add 3mm boxes on each side`
+- `add 2mm boxes around this` / `add 2mm boxes on all sides`
+- `add 4mm box above`
+- `add 4mm box below`
+- `add 5mm box here` (centered box)
+- `cut pocket 2mm here` / `cut 2mm at selected region`
+- `add boss 2mm`
+- `drill hole 2mm`
+- `cut slot 2mm`
+- `pattern 6 boxes 2mm`
+- `fillet 1.5mm`
+- `chamfer 1mm`
+
+Fillet/chamfer execution mode:
+
+- Uses selected region bounding volume to query candidate edges in FeatureScript.
+- Applies operation to edges found in that local volume.
+- `topology_status` in response indicates what kind of topology metadata was available.
+
+## Safety checks
+
+All numeric dimensions are clamped to a safe range derived from the selected region bounding box.
+
+## History and undo metadata
+
+- Response now includes:
+  - `operation_id`
+  - `undo_available`
+  - `undo_hint`
+  - `topology_status`
+- Chat execution history endpoint:
+  - `GET /api/chat/history`
+  - returns persisted operation metadata (file-backed)
+
+## Optional LLM planner (disabled by default)
+
+Environment variables:
+
+- `ENABLE_LLM_PLANNER=true`
+- `OPENAI_API_KEY=...`
+- `OPENAI_MODEL=gpt-4.1-mini`
+
+When enabled, backend attempts LLM intent planning first; if unavailable/fails, deterministic parser is used.
+
+Implementation files:
+
+- `backend/src/services/featurescript.py`
+- `backend/src/services/agentic_loop.py`
+
 ## Suggested prompt assembly
 
 - **System message**: CAD-edit assistant behavior + safety constraints.

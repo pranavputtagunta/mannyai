@@ -6,6 +6,28 @@ export interface Coordinate {
   z: number;
 }
 
+export interface ChatHistoryItem {
+  operation_id: string;
+  timestamp: number;
+  status?: "executed" | "failed";
+  action: string;
+  prompt: string;
+  document_id: string;
+  workspace_type: string;
+  workspace_id: string;
+  element_id: string;
+  region_topology_id: string | null;
+  topology_status?: string;
+  error?: string;
+}
+
+export interface ClearAllPayload {
+  document_id: string;
+  workspace_type: "w" | "v" | "m";
+  workspace_id: string;
+  element_id: string;
+}
+
 const BACKEND_URL = "http://localhost:8000/api";
 
 export const fetchModelFromOnshape = async (
@@ -76,4 +98,22 @@ export const sendCopilotPrompt = async (
     console.error("Copilot request failed:", error);
     throw error;
   }
+};
+
+export const fetchChatHistory = async (): Promise<ChatHistoryItem[]> => {
+  try {
+    const response = await axios.get(`${BACKEND_URL}/chat/history`);
+    const items = Array.isArray(response.data?.items) ? response.data.items : [];
+    return items as ChatHistoryItem[];
+  } catch (error) {
+    console.error("Failed to fetch chat history:", error);
+    return [];
+  }
+};
+
+export const clearAllGeneratedEdits = async (
+  payload: ClearAllPayload,
+): Promise<{ message: string; cleared_count: number; executed: boolean }> => {
+  const response = await axios.post(`${BACKEND_URL}/chat/clear-all`, payload);
+  return response.data;
 };

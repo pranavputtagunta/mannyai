@@ -5,7 +5,7 @@ import Viewer3D, {
   type SelectionPayload,
 } from "./components/Viewer3D";
 import type { Coordinate } from "./services/api";
-import { fetchModelFromOnshape } from "./services/api";
+import { clearAllGeneratedEdits, fetchModelFromOnshape } from "./services/api";
 import "./App.css";
 
 interface RegionSelectionJson {
@@ -14,6 +14,7 @@ interface RegionSelectionJson {
   };
   cad_context: {
     document_id: string;
+    workspace_type: "w" | "v" | "m" | "";
     workspace_id: string;
     element_id: string;
     length_units: "millimeter";
@@ -26,6 +27,8 @@ interface RegionSelectionJson {
     spatial_math: {
       center_of_mass: [number, number, number];
       surface_normal: [number, number, number];
+      support_point_outward?: [number, number, number] | null;
+      support_point_inward?: [number, number, number] | null;
       bounding_box:
         | {
         min: [number, number, number];
@@ -33,6 +36,9 @@ interface RegionSelectionJson {
           }
         | null;
     };
+    selection_view: {
+      camera_position: [number, number, number];
+    } | null;
     adjacent_entities: Array<{
       entity_type: "FACE" | "EDGE";
       topology_id: string;
@@ -135,6 +141,60 @@ function averageNormal(
   return normalizeVector(normal);
 }
 
+function orientNormalToView(
+  normal: Coordinate | null,
+  center: Coordinate,
+  viewContext: SelectionPayload["viewContext"] | null,
+): Coordinate | null {
+  if (!normal) {
+    return null;
+  }
+
+  if (!viewContext) {
+    return normal;
+  }
+
+  const toCamera = {
+    x: viewContext.cameraPosition.x - center.x,
+    y: viewContext.cameraPosition.y - center.y,
+    z: viewContext.cameraPosition.z - center.z,
+  };
+
+  const dot = normal.x * toCamera.x + normal.y * toCamera.y + normal.z * toCamera.z;
+  if (dot >= 0) {
+    return normal;
+  }
+
+  return { x: -normal.x, y: -normal.y, z: -normal.z };
+}
+
+function supportPointAlongNormal(
+  sampledSurface: SelectionPayload["sampledSurface"],
+  normal: Coordinate,
+  useMax: boolean,
+): [number, number, number] | null {
+  if (sampledSurface.length === 0) {
+    return null;
+  }
+
+  let best = sampledSurface[0];
+  let bestDot =
+    sampledSurface[0].point.x * normal.x +
+    sampledSurface[0].point.y * normal.y +
+    sampledSurface[0].point.z * normal.z;
+
+  sampledSurface.slice(1).forEach((item) => {
+    const dot = item.point.x * normal.x + item.point.y * normal.y + item.point.z * normal.z;
+    const shouldReplace = useMax ? dot > bestDot : dot < bestDot;
+    if (shouldReplace) {
+      best = item;
+      bestDot = dot;
+    }
+  });
+
+  return [best.point.x, best.point.y, best.point.z];
+}
+
 function inferSurfaceGeometry(
   sampledSurface: SelectionPayload["sampledSurface"],
 ): "PLANE" | "CYLINDER" | "NURBS" | "UNKNOWN" {
@@ -204,10 +264,29 @@ function buildRegionSelectionJson(
       ]
     : [0, 0, 0];
 
-  const derivedNormal = averageNormal(selection.sampledSurface);
+  const centerCoordinate: Coordinate = {
+    x: derivedCenter[0],
+    y: derivedCenter[1],
+    z: derivedCenter[2],
+  };
+
+  const rawNormal = averageNormal(selection.sampledSurface);
+  const derivedNormal = orientNormalToView(
+    rawNormal,
+    centerCoordinate,
+    selection.viewContext,
+  );
+
   const derivedNormalTuple: [number, number, number] = derivedNormal
     ? [derivedNormal.x, derivedNormal.y, derivedNormal.z]
     : [0, 0, 1];
+
+  const supportOutward = derivedNormal
+    ? supportPointAlongNormal(selection.sampledSurface, derivedNormal, true)
+    : null;
+  const supportInward = derivedNormal
+    ? supportPointAlongNormal(selection.sampledSurface, derivedNormal, false)
+    : null;
 
   return {
     intent: {
@@ -215,6 +294,7 @@ function buildRegionSelectionJson(
     },
     cad_context: {
       document_id: modelContext?.did ?? "",
+      workspace_type: modelContext?.wvm ?? "",
       workspace_id: modelContext?.wvmid ?? "",
       element_id: modelContext?.eid ?? "",
       length_units: "millimeter",
@@ -227,8 +307,19 @@ function buildRegionSelectionJson(
       spatial_math: {
         center_of_mass: derivedCenter,
         surface_normal: derivedNormalTuple,
+        support_point_outward: supportOutward,
+        support_point_inward: supportInward,
         bounding_box: computeBounds(selection.boundedVertices),
       },
+      selection_view: selection.viewContext
+        ? {
+            camera_position: [
+              selection.viewContext.cameraPosition.x,
+              selection.viewContext.cameraPosition.y,
+              selection.viewContext.cameraPosition.z,
+            ],
+          }
+        : null,
       adjacent_entities: adjacentEntities(selection.faceHits),
     },
   };
@@ -241,6 +332,10 @@ export default function App(): ReactElement {
   const [selection, setSelection] = useState<SelectionPayload | null>(null);
   const [modelContext, setModelContext] = useState<ModelContext | null>(null);
   const [intentPrompt, setIntentPrompt] = useState<string>("");
+  const [modelTint, setModelTint] = useState<string | null>(null);
+  const [sphereTint, setSphereTint] = useState<string | null>(null);
+  const [backgroundTint, setBackgroundTint] = useState<string | null>(null);
+  const [sphereTintAnchor, setSphereTintAnchor] = useState<[number, number, number] | null>(null);
 
   const regionSelectionJson = useMemo<RegionSelectionJson | null>(() => {
     return buildRegionSelectionJson(selection, modelContext, intentPrompt);
@@ -294,6 +389,24 @@ export default function App(): ReactElement {
     }
   };
 
+  const handleOperationApplied = async (): Promise<void> => {
+    if (!modelContext?.sourceUrl) {
+      return;
+    }
+
+    try {
+      const refreshedObjectUrl = await fetchModelFromOnshape(modelContext.sourceUrl);
+      setModelUrl((previousUrl) => {
+        if (previousUrl) {
+          URL.revokeObjectURL(previousUrl);
+        }
+        return refreshedObjectUrl;
+      });
+    } catch (error) {
+      console.error("Failed to refresh model after operation:", error);
+    }
+  };
+
   const handleSelectionChange = (nextSelection: SelectionPayload | null) => {
     if (
       selectionMode === "click" &&
@@ -317,6 +430,77 @@ export default function App(): ReactElement {
 
   const handleClearSelection = () => {
     setSelection(null);
+  };
+
+  const handleRecolorModel = (
+    color: string | null,
+    target: "model" | "sphere" | "background" | "all",
+    anchor: [number, number, number] | null,
+  ) => {
+    if (target === "all") {
+      setModelTint(color);
+      setSphereTint(color);
+      setBackgroundTint(color);
+      setSphereTintAnchor(null);
+      return;
+    }
+
+    if (target === "sphere") {
+      setModelTint(null);
+      setSphereTint(color);
+      setSphereTintAnchor(anchor);
+      return;
+    }
+
+    if (target === "background") {
+      setModelTint(null);
+      setBackgroundTint(color);
+      setSphereTintAnchor(null);
+      return;
+    }
+
+    setSphereTint(null);
+    setBackgroundTint(null);
+    setSphereTintAnchor(null);
+    setModelTint(color);
+  };
+
+  const handleClearAll = async () => {
+    setSelection(null);
+    setIntentPrompt("");
+    setModelTint(null);
+    setSphereTint(null);
+    setBackgroundTint(null);
+    setSphereTintAnchor(null);
+    localStorage.removeItem("agentfix.regionSelection");
+    localStorage.removeItem("agentfix.regionSelectionForLlm");
+
+    if (!modelContext) {
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      await clearAllGeneratedEdits({
+        document_id: modelContext.did,
+        workspace_type: modelContext.wvm,
+        workspace_id: modelContext.wvmid,
+        element_id: modelContext.eid,
+      });
+
+      const refreshedObjectUrl = await fetchModelFromOnshape(modelContext.sourceUrl);
+      setModelUrl((previousUrl) => {
+        if (previousUrl) {
+          URL.revokeObjectURL(previousUrl);
+        }
+        return refreshedObjectUrl;
+      });
+    } catch (error) {
+      console.error("Failed to clear all generated edits:", error);
+      alert("Clear all failed. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -357,6 +541,9 @@ export default function App(): ReactElement {
           selectedCoordinates={selection?.coordinates ?? null}
           selectedMode={selection?.mode ?? null}
           onPromptCaptured={handlePromptCaptured}
+          onOperationApplied={handleOperationApplied}
+          onClearSelection={handleClearSelection}
+          onRecolorModel={handleRecolorModel}
         />
       </div>
 
@@ -388,7 +575,15 @@ export default function App(): ReactElement {
             className="selection-btn"
             onClick={handleClearSelection}
           >
-            Clear
+            Clear Selection
+          </button>
+          <button
+            type="button"
+            className="selection-btn"
+            onClick={handleClearAll}
+            disabled={isLoading}
+          >
+            Clear All
           </button>
           {selection?.coordinates && (
             <span className="selection-meta">
@@ -416,6 +611,10 @@ export default function App(): ReactElement {
           modelUrl={modelUrl}
           selectionMode={selectionMode}
           selection={selection}
+          tintColor={modelTint}
+          sphereTintColor={sphereTint}
+          backgroundTintColor={backgroundTint}
+          sphereTintAnchor={sphereTintAnchor}
           onSelectionChange={handleSelectionChange}
         />
       </div>

@@ -1,6 +1,9 @@
-import React, { useState, type ReactElement } from "react";
+import React, { useEffect, useRef, useState, type ReactElement } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { sendCopilotPrompt, type Coordinate } from "../services/api";
+import {
+  sendCopilotPrompt,
+  type Coordinate,
+} from "../services/api";
 import "../assets/ChatInterface.css";
 
 interface ChatInterfaceProps {
@@ -8,6 +11,13 @@ interface ChatInterfaceProps {
   selectedCoordinates: Coordinate | null;
   selectedMode: "click" | "lasso" | "circle" | null;
   onPromptCaptured: (prompt: string) => void;
+  onOperationApplied: () => Promise<void>;
+  onClearSelection: () => void;
+  onRecolorModel: (
+    color: string | null,
+    target: "model" | "sphere" | "background" | "all",
+    anchor: [number, number, number] | null,
+  ) => void;
 }
 
 interface Message {
@@ -20,6 +30,9 @@ export default function ChatInterface({
   selectedCoordinates,
   selectedMode,
   onPromptCaptured,
+  onOperationApplied,
+  onClearSelection,
+  onRecolorModel,
 }: ChatInterfaceProps): ReactElement {
   const [input, setInput] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([
@@ -29,6 +42,12 @@ export default function ChatInterface({
     },
   ]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [awaitingDoneConfirmation, setAwaitingDoneConfirmation] = useState<boolean>(false);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, isProcessing]);
 
   // We explicitly namespace React.FormEvent here to avoid the global DOM collision
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -36,13 +55,42 @@ export default function ChatInterface({
     if (!input.trim()) return;
 
     const userMsg = input;
+
+    if (awaitingDoneConfirmation) {
+      const normalized = userMsg.trim().toLowerCase();
+      const isDone = /^(yes|y|done|finished|complete|clear|clear selection)$/.test(normalized);
+      const isNotDone = /^(no|n|not yet|keep|continue)$/.test(normalized);
+
+      setInput("");
+      setMessages((prev) => [...prev, { role: "user", text: userMsg }]);
+
+      if (isDone) {
+        onClearSelection();
+        setAwaitingDoneConfirmation(false);
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", text: "Selection cleared. Pick another area when you're ready." },
+        ]);
+        return;
+      }
+
+      if (isNotDone) {
+        setAwaitingDoneConfirmation(false);
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", text: "Keeping the current selection active." },
+        ]);
+        return;
+      }
+    }
+
     onPromptCaptured(userMsg);
     setInput("");
     setMessages((prev) => [...prev, { role: "user", text: userMsg }]);
     setIsProcessing(true);
 
     try {
-      const response = await sendCopilotPrompt(userMsg, selectedCoordinates);
+  	  const response = await sendCopilotPrompt(userMsg, selectedCoordinates);
       setMessages((prev) => [
         ...prev,
         {
@@ -50,12 +98,50 @@ export default function ChatInterface({
           text: response.message || "Modification applied.",
         },
       ]);
-    } catch (err) {
+
+      if (response?.executed) {
+        if (response?.action === "recolor_model") {
+          const recolor = typeof response?.model_color === "string" ? response.model_color : "default";
+          const target =
+            response?.model_color_target === "sphere" ||
+            response?.model_color_target === "background" ||
+            response?.model_color_target === "all"
+              ? response.model_color_target
+              : "model";
+          const anchor =
+            Array.isArray(response?.model_color_anchor) && response.model_color_anchor.length === 3
+              ? [
+                  Number(response.model_color_anchor[0]),
+                  Number(response.model_color_anchor[1]),
+                  Number(response.model_color_anchor[2]),
+                ] as [number, number, number]
+              : null;
+          onRecolorModel(recolor === "default" ? null : recolor, target, anchor);
+        } else {
+          await onOperationApplied();
+          if (selectedCoordinates) {
+            setAwaitingDoneConfirmation(true);
+            setMessages((prev) => [
+              ...prev,
+              {
+                role: "assistant",
+                text: "Done with this area? Reply 'yes' or 'done' and I will clear the blue highlight.",
+              },
+            ]);
+          }
+        }
+      }
+    } catch (err: any) {
+      const backendMessage =
+        err?.response?.data?.detail ||
+        err?.response?.data?.message ||
+        err?.message ||
+        "Failed to apply modification. Please check constraints.";
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          text: "Failed to apply modification. Please check constraints.",
+          text: String(backendMessage),
         },
       ]);
     } finally {
@@ -94,6 +180,7 @@ export default function ChatInterface({
             </motion.div>
           )}
         </AnimatePresence>
+        <div ref={messagesEndRef} />
       </div>
 
       <div className="input-container">

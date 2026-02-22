@@ -9,6 +9,9 @@ class Settings:
     ONSHAPE_ACCESS_KEY: str = os.getenv("ONSHAPE_ACCESS_KEY", "")
     ONSHAPE_SECRET_KEY: str = os.getenv("ONSHAPE_SECRET_KEY", "")
     ONSHAPE_BASE_URL: str = os.getenv("ONSHAPE_BASE_URL", "https://cad.onshape.com")
+    ENABLE_LLM_PLANNER: bool = os.getenv("ENABLE_LLM_PLANNER", "false").lower() == "true"
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
 
 settings = Settings()
