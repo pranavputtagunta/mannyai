@@ -58,8 +58,6 @@ export default function LassoSelector({
   const { camera, scene, size } = useThree();
   const raycaster = useMemo(() => new THREE.Raycaster(), []);
   const ndc = useMemo(() => new THREE.Vector2(), []);
-
-  // optional tiny “visual confirmation” overlay (single dot cloud)
   const debugPointsRef = useRef<THREE.Points | null>(null);
 
   const clearDebug = () => {
@@ -75,7 +73,6 @@ export default function LassoSelector({
     if (!enabled) return;
     if (!lassoPointsPx || lassoPointsPx.length < 3) return;
 
-    // selectable meshes
     const meshes: THREE.Object3D[] = [];
     scene.traverse((obj) => {
       if (!(obj as any).isMesh) return;
@@ -100,7 +97,6 @@ export default function LassoSelector({
     const hitsWorld: HitSample[] = [];
     const debugPositions: number[] = [];
 
-    // sample rays inside lasso
     for (let y = minY; y <= maxY; y += sampleStepPx) {
       for (let x = minX; x <= maxX; x += sampleStepPx) {
         if (!pointInPoly(x, y, lassoPointsPx)) continue;
@@ -116,29 +112,49 @@ export default function LassoSelector({
         const p = h.point;
         hitsWorld.push({
           pointWorld: [p.x, p.y, p.z],
-          normalWorld: h.face?.normal ? [h.face.normal.x, h.face.normal.y, h.face.normal.z] : undefined,
+          normalWorld: h.face?.normal
+            ? [h.face.normal.x, h.face.normal.y, h.face.normal.z]
+            : undefined,
         });
 
-        // debug overlay point
         debugPositions.push(p.x, p.y, p.z);
       }
     }
 
-    // render tiny point cloud to show user “you selected here”
+    console.log("[LASSO] meshes:", meshes.length, "hits:", hitsWorld.length);
+
     if (debugPositions.length) {
+      // Compute dynamic point size from actual hit spread
+      const xs = debugPositions.filter((_, i) => i % 3 === 0);
+      const ys = debugPositions.filter((_, i) => i % 3 === 1);
+      const zs = debugPositions.filter((_, i) => i % 3 === 2);
+      const rangeX = Math.max(...xs) - Math.min(...xs);
+      const rangeY = Math.max(...ys) - Math.min(...ys);
+      const rangeZ = Math.max(...zs) - Math.min(...zs);
+      const modelExtent = Math.max(rangeX, rangeY, rangeZ, 0.1); // floor at 0.1
+      const pointSize = modelExtent * 0.025; // 2.5% of model extent
+
+      console.log("[LASSO] modelExtent:", modelExtent, "pointSize:", pointSize);
+
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.Float32BufferAttribute(debugPositions, 3));
-        const m = new THREE.PointsMaterial({
-        size: 0.003,
+
+      const m = new THREE.PointsMaterial({
+        size: pointSize,
         color: new THREE.Color(0x22d3ee),
-        transparent: true,
-        opacity: 0.15,
+        transparent: false,
+        opacity: 1.0,
         depthWrite: false,
-        });
+        depthTest: false,
+        sizeAttenuation: true,
+      });
+
       const pts = new THREE.Points(g, m);
-      pts.renderOrder = 999;
+      pts.renderOrder = 9999;
       scene.add(pts);
       debugPointsRef.current = pts;
+
+      console.log("[LASSO] points added to scene:", pts.uuid);
     }
 
     onSelection({
@@ -146,14 +162,13 @@ export default function LassoSelector({
       lasso: { pointsPx: lassoPointsPx, bboxPx: bb },
     });
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, lassoPointsPx]);
 
-  useEffect(() => {
-    if (enabled) return;
-    clearDebug();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled]);
-
+    useEffect(() => {
+    if (lassoPointsPx === null) {
+        clearDebug();
+    }
+    }, [lassoPointsPx]);
   return null;
 }

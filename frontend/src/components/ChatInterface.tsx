@@ -10,6 +10,7 @@ interface ChatInterfaceProps {
   viewingVersion?: number | null;
   latestVersion?: number | null;
   onModelUpdated: (newGlbUrl: string) => void;
+  selectedPoints?: Array<[number, number, number]> | null;
 }
 
 interface Message {
@@ -20,11 +21,7 @@ interface Message {
 const BACKEND_BASE = "http://localhost:8000";
 
 function toAbsoluteUrl(maybeRelativeUrl: string): string {
-  // Handles both:
-  //  - "/api/cad/.../download/glb"
-  //  - "http://localhost:8000/api/cad/.../download/glb"
   const u = new URL(maybeRelativeUrl, BACKEND_BASE);
-  // single cache-bust param (overwrite if exists)
   u.searchParams.set("t", String(Date.now()));
   return u.toString();
 }
@@ -35,6 +32,7 @@ export default function ChatInterface({
   viewingVersion,
   latestVersion,
   onModelUpdated,
+  selectedPoints,
 }: ChatInterfaceProps): JSX.Element {
   const [input, setInput] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([
@@ -52,6 +50,7 @@ export default function ChatInterface({
     viewingVersion < latestVersion;
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    console.log("modelId at submit time:", modelId);
     e.preventDefault();
     if (!input.trim()) return;
 
@@ -65,14 +64,28 @@ export default function ChatInterface({
 
     const userMsg = input;
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", text: userMsg }]);
+
+    const selectionNote =
+      selectedPoints && selectedPoints.length > 0
+        ? ` (targeting ${selectedPoints.length} selected points)`
+        : "";
+
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", text: userMsg + selectionNote },
+    ]);
     setIsProcessing(true);
 
     try {
       // AI mode: backend classifies intent and routes to appropriate handler
       // Pass from_version if editing from a previous version (triggers truncation)
       const fromVersion = isEditingFromPrevious ? viewingVersion : undefined;
-      const res = await applyCadQueryFromText(modelId, userMsg, fromVersion);
+      const res = await applyCadQueryFromText(
+        modelId,
+        userMsg,
+        fromVersion,
+        selectedPoints ?? undefined,
+      );
 
       setMessages((prev) => [
         ...prev,
@@ -102,6 +115,47 @@ export default function ChatInterface({
 
   return (
     <div className="chat-layout">
+      {/* Selection indicator */}
+      {selectedPoints && selectedPoints.length > 0 && (
+        <div
+          style={{
+            margin: "0 0 8px 0",
+            padding: "6px 12px",
+            borderRadius: 8,
+            background: "rgba(34, 211, 238, 0.1)",
+            border: "1px solid rgba(34, 211, 238, 0.3)",
+            color: "#22d3ee",
+            fontSize: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          <span>⬡</span>
+          <span>
+            {selectedPoints.length} points selected — prompt will target this
+            region
+          </span>
+        </div>
+      )}
+
+      {/* Version warning */}
+      {isEditingFromPrevious && (
+        <div
+          style={{
+            margin: "0 0 8px 0",
+            padding: "6px 12px",
+            borderRadius: 8,
+            background: "rgba(251, 191, 36, 0.1)",
+            border: "1px solid rgba(251, 191, 36, 0.3)",
+            color: "#fbbf24",
+            fontSize: 12,
+          }}
+        >
+          ⚠ Editing from v{viewingVersion} — newer versions will be discarded
+        </div>
+      )}
+
       <div className="messages-area">
         <AnimatePresence initial={false}>
           {messages.map((msg, idx) => (
@@ -140,7 +194,11 @@ export default function ChatInterface({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={isLoading || isProcessing}
-            placeholder="e.g. add a ball on top / scale 1.2 / cut a hole"
+            placeholder={
+              selectedPoints && selectedPoints.length > 0
+                ? "Describe what to do with the selected region..."
+                : "e.g. add a ball on top / scale 1.2 / cut a hole"
+            }
             className="chat-input"
           />
           <button

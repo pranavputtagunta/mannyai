@@ -1,10 +1,4 @@
 // frontend/src/services/api.ts
-/**
- * AI MODE:
- * Text -> backend /api/chat/prompt
- * Backend calls OpenAI -> generates CadQuery -> applies to STEP -> returns URLs
- */
-// frontend/src/services/api.ts
 
 export async function uploadStep(file: File) {
   const fd = new FormData();
@@ -28,11 +22,13 @@ export async function uploadStep(file: File) {
  * Text -> backend /api/chat/prompt
  * Backend calls OpenAI -> generates CadQuery -> applies to STEP -> returns URLs
  * @param fromVersion - If editing from a previous version, pass the version number to truncate history
+ * @param selectedPoints - Optional lasso selection points to target specific region
  */
 export async function applyCadQueryFromText(
   modelId: string,
   prompt: string,
   fromVersion?: number,
+  selectedPoints?: Array<[number, number, number]>,
 ) {
   const res = await fetch("http://localhost:8000/api/chat/prompt", {
     method: "POST",
@@ -40,14 +36,16 @@ export async function applyCadQueryFromText(
     body: JSON.stringify({
       model_id: modelId,
       prompt,
-      params: {},
+      params: {
+        selection: selectedPoints ?? null,
+      },
       from_version: fromVersion ?? null,
     }),
   });
 
   if (!res.ok) throw new Error(await res.text());
 
-  const data = (await res.json()) as {
+  const data = await res.json() as {
     status: string;
     message?: string;
     intent: string; // "modification" | "query" | "help" | "unknown"
@@ -72,17 +70,15 @@ export async function applyCadQueryFromText(
 }
 
 /**
- * Backwards-compat alias so you don't have to touch ChatInterface code
- * if it still imports applyOpFromText.
- *
- * NOTE: This is now AI-driven.
+ * Backwards-compat alias
  */
 export async function applyOpFromText(
   modelId: string,
   text: string,
   fromVersion?: number,
+  selectedPoints?: Array<[number, number, number]>,
 ) {
-  return applyCadQueryFromText(modelId, text, fromVersion);
+  return applyCadQueryFromText(modelId, text, fromVersion, selectedPoints);
 }
 
 // ============== VERSION HISTORY API ==============
@@ -100,21 +96,12 @@ export interface VersionHistoryResponse {
   current_version: number | null;
 }
 
-/**
- * Fetch version history for a model
- */
-export async function getVersions(
-  modelId: string,
-): Promise<VersionHistoryResponse> {
+export async function getVersions(modelId: string): Promise<VersionHistoryResponse> {
   const res = await fetch(`http://localhost:8000/api/chat/versions/${modelId}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
-/**
- * Checkout model files from a specific version for viewing.
- * This is NON-DESTRUCTIVE - history is preserved.
- */
 export async function checkoutVersion(
   modelId: string,
   version: number,
