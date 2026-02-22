@@ -168,6 +168,8 @@ async def chat_prompt(req: ChatPromptRequest):
             )
             _tlog("export_stl", t2)
 
+            cq.exporters.export(result_model, str(model_dir / "preview.step"))
+
             t3 = time.time()
             _stl_to_glb(stl_path, glb_path)
             _tlog("stl_to_glb", t3)

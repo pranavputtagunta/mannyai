@@ -198,3 +198,26 @@ async def download_glb(model_id: str):
     if not glb_path.exists():
         _regen_preview(step_path)
     return FileResponse(str(glb_path), filename="preview.glb", media_type="model/gltf-binary")
+
+@router.post("/{model_id}/save")
+async def save_checkpoint(model_id: str):
+    step_path = _require_model(model_id)
+    model_dir = step_path.parent
+    preview_stl = model_dir / "preview.stl"
+
+    # Load the current preview and overwrite the base STEP
+    if not preview_stl.exists():
+        raise HTTPException(400, "No modified model to save yet.")
+
+    # Re-export preview STL back to STEP as the new base
+    model = cq.importers.importStep(str(step_path))
+    preview_step = model_dir / "preview.step"
+
+    if preview_step.exists():
+        # preview.step exists if we saved it — use that as new base
+        import shutil
+        shutil.copy(preview_step, step_path)
+    else:
+        raise HTTPException(400, "No preview STEP found. Run a modification first.")
+
+    return {"status": "saved", "message": "Model checkpoint saved as new base."}
