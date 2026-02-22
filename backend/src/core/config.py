@@ -9,6 +9,6 @@ class Settings:
     ONSHAPE_ACCESS_KEY: str = os.getenv("ONSHAPE_ACCESS_KEY", "")
     ONSHAPE_SECRET_KEY: str = os.getenv("ONSHAPE_SECRET_KEY", "")
     ONSHAPE_BASE_URL: str = os.getenv("ONSHAPE_BASE_URL", "https://cad.onshape.com")
-
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 
 settings = Settings()
