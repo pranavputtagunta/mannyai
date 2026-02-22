@@ -11,11 +11,14 @@ interface ChatInterfaceProps {
   latestVersion?: number | null;
   onModelUpdated: (newGlbUrl: string) => void;
   selectedPoints?: Array<[number, number, number]> | null;
+  showingHeatmap?: boolean;
+  onClearHeatmap?: () => void;
 }
 
 interface Message {
   role: "user" | "assistant";
   text: string;
+  thoughtProcess?: string | null;
 }
 
 const BACKEND_BASE = "http://localhost:8000";
@@ -33,6 +36,8 @@ export default function ChatInterface({
   latestVersion,
   onModelUpdated,
   selectedPoints,
+  showingHeatmap,
+  onClearHeatmap,
 }: ChatInterfaceProps): JSX.Element {
   const [input, setInput] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([
@@ -42,6 +47,7 @@ export default function ChatInterface({
     },
   ]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [showThoughtProcess, setShowThoughtProcess] = useState<boolean>(false);
 
   // Determine if editing from a previous version (will cause truncation)
   const isEditingFromPrevious =
@@ -89,7 +95,11 @@ export default function ChatInterface({
 
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: res.message || "Response received." },
+        {
+          role: "assistant",
+          text: res.message || "Response received.",
+          thoughtProcess: res.thought_process,
+        },
       ]);
 
       // Only update the model view if this was a modification (glb_url present)
@@ -156,6 +166,70 @@ export default function ChatInterface({
         </div>
       )}
 
+      {/* Heatmap active indicator */}
+      {showingHeatmap && (
+        <div
+          style={{
+            margin: "0 0 8px 0",
+            padding: "6px 12px",
+            borderRadius: 8,
+            background: "rgba(239, 68, 68, 0.1)",
+            border: "1px solid rgba(239, 68, 68, 0.3)",
+            color: "#ef4444",
+            fontSize: 12,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <span>🔥 Heatmap analysis active</span>
+          <button
+            onClick={onClearHeatmap}
+            style={{
+              background: "rgba(239, 68, 68, 0.2)",
+              border: "1px solid rgba(239, 68, 68, 0.4)",
+              borderRadius: 4,
+              color: "#ef4444",
+              padding: "2px 8px",
+              fontSize: 11,
+              cursor: "pointer",
+            }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      {/* Show thought process toggle */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 8,
+          padding: "4px 8px",
+          fontSize: 11,
+          color: "#a3a3a3",
+        }}
+      >
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            cursor: "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={showThoughtProcess}
+            onChange={(e) => setShowThoughtProcess(e.target.checked)}
+            style={{ accentColor: "#8b5cf6" }}
+          />
+          Show AI reasoning
+        </label>
+      </div>
+
       <div className="messages-area">
         <AnimatePresence initial={false}>
           {messages.map((msg, idx) => (
@@ -165,7 +239,35 @@ export default function ChatInterface({
               animate={{ opacity: 1, y: 0 }}
               className={`message-row ${msg.role}`}
             >
-              <div className={`message-bubble ${msg.role}`}>{msg.text}</div>
+              <div className={`message-bubble ${msg.role}`}>
+                {msg.text}
+                {showThoughtProcess && msg.thoughtProcess && (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      padding: "8px 10px",
+                      borderRadius: 6,
+                      background: "rgba(139, 92, 246, 0.1)",
+                      border: "1px solid rgba(139, 92, 246, 0.2)",
+                      fontSize: 11,
+                      color: "#a78bfa",
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: 600,
+                        marginBottom: 4,
+                        fontSize: 10,
+                        opacity: 0.7,
+                      }}
+                    >
+                      🧠 AI Reasoning
+                    </div>
+                    {msg.thoughtProcess}
+                  </div>
+                )}
+              </div>
             </motion.div>
           ))}
 

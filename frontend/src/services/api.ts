@@ -45,11 +45,12 @@ export async function applyCadQueryFromText(
 
   if (!res.ok) throw new Error(await res.text());
 
-  const data = await res.json() as {
+  const data = (await res.json()) as {
     status: string;
     message?: string;
     intent: string; // "modification" | "query" | "help" | "unknown"
     code?: string | null;
+    thought_process?: string | null;
     glb_url?: string | null;
     step_url?: string | null;
   };
@@ -96,7 +97,9 @@ export interface VersionHistoryResponse {
   current_version: number | null;
 }
 
-export async function getVersions(modelId: string): Promise<VersionHistoryResponse> {
+export async function getVersions(
+  modelId: string,
+): Promise<VersionHistoryResponse> {
   const res = await fetch(`http://localhost:8000/api/chat/versions/${modelId}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();

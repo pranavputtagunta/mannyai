@@ -30,6 +30,7 @@ export default function App(): JSX.Element {
   > | null>(null);
 
   const [modelStats, setModelStats] = useState<ModelDimensions | null>(null);
+  const [showingHeatmap, setShowingHeatmap] = useState(false);
 
   const refreshVersions = async (id: string) => {
     try {
@@ -223,9 +224,22 @@ export default function App(): JSX.Element {
           latestVersion={currentVersion}
           onModelUpdated={(newGlbUrl: string) => {
             setModelUrl(newGlbUrl);
-            if (modelId) refreshVersions(modelId);
+            // Track if this is a heatmap URL
+            setShowingHeatmap(newGlbUrl.includes("/heatmap"));
+            if (modelId && !newGlbUrl.includes("/heatmap")) {
+              refreshVersions(modelId);
+            }
           }}
           selectedPoints={selectedPoints}
+          showingHeatmap={showingHeatmap}
+          onClearHeatmap={() => {
+            if (modelId) {
+              setModelUrl(
+                `http://localhost:8000/api/cad/${modelId}/download/glb?t=${Date.now()}`,
+              );
+              setShowingHeatmap(false);
+            }
+          }}
         />
       </div>
 

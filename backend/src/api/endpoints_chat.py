@@ -28,7 +28,7 @@ router = APIRouter()
 API_KEY = settings.OPENAI_API_KEY
 client = OpenAI(api_key=API_KEY)
 
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "o3-mini")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-mini")
 
 # In-memory chat history storage (keyed by model_id)
 chat_histories: Dict[str, List[Dict[str, Any]]] = {}
@@ -46,6 +46,7 @@ class ChatPromptResponse(BaseModel):
     message: str
     intent: str = "modification"  # modification, query, help, unknown
     code: str | None = None  # Only present for modifications
+    thought_process: str | None = None  # AI reasoning (only for modifications)
     glb_url: str | None = None  # Only present for modifications
     step_url: str | None = None  # Only present for modifications
     model_config = {"protected_namespaces": ()}
@@ -771,7 +772,7 @@ Study these scripts. Use their syntax and techniques to fulfill the user's reque
     safe_thought = data['thought_process'].encode('ascii', 'replace').decode('ascii')
     print(f"\n[AI THOUGHT PROCESS]\n{safe_thought}\n", flush=True)
     
-    return data["code"].strip()
+    return {"code": data["code"].strip(), "thought_process": safe_thought}
 
 def _add_to_history(model_id: str, role: str, content: str):
     """Add a message to the chat history for a model."""
@@ -960,24 +961,27 @@ async def chat_prompt(req: ChatPromptRequest):
             }
             del req.params["selection"]  # ← never send raw points to LLM
 
-    t_enhance = time.time()
-    chat_history_str = _get_chat_history_for_prompt(req.model_id, max_messages=4)
-    enhanced_blueprint = _enhance_prompt(req.prompt, chat_history_str)
+    # t_enhance = time.time()
+    # chat_history_str = _get_chat_history_for_prompt(req.model_id, max_messages=4)
+    # enhanced_blueprint = _enhance_prompt(req.prompt, chat_history_str)
 
-    safe_blueprint = enhanced_blueprint.encode('ascii', 'replace').decode('ascii')
-    print(f"\n[ENHANCED BLUEPRINT]\n{safe_blueprint}\n", flush=True)
-    _tlog("enhance_prompt", t_enhance)
+    # safe_blueprint = enhanced_blueprint.encode('ascii', 'replace').decode('ascii')
+    # print(f"\n[ENHANCED BLUEPRINT]\n{safe_blueprint}\n", flush=True)
+    # _tlog("enhance_prompt", t_enhance)
 
     MAX_RETRIES = 3
     last_err = "Unknown"
     last_code = ""
+    last_thought = ""
 
     for attempt in range(MAX_RETRIES):
         try:
             # 1) Generate CadQuery code
             t0 = time.time()
-            coder_prompt = f"USER INTENT: {req.prompt}\n\nSTRICT GEOMETRIC BLUEPRINT TO FOLLOW:\n{enhanced_blueprint}"
-            last_code = _openai_generate_cadquery(coder_prompt, req.params, req.model_id)
+            # coder_prompt = f"USER INTENT: {req.prompt}\n\nSTRICT GEOMETRIC BLUEPRINT TO FOLLOW:\n{enhanced_blueprint}"
+            gen_result = _openai_generate_cadquery(req.prompt, req.params, req.model_id)
+            last_code = gen_result["code"]
+            last_thought = gen_result["thought_process"]
             _tlog("openai_generate", t0)
 
             # 2) Execute AI CadQuery
@@ -1081,6 +1085,7 @@ async def chat_prompt(req: ChatPromptRequest):
                 "message": assistant_message,
                 "intent": "modification",
                 "code": last_code,
+                "thought_process": last_thought,
                 "glb_url": f"/api/cad/{req.model_id}/download/glb",
                 "step_url": f"/api/cad/{req.model_id}/download/step",
             }
