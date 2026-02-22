@@ -1,56 +1,142 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { sendCopilotPrompt } from "../services/api";
+import { loadUseCase } from "../services/api";
 import "../assets/ChatInterface.css";
 
 interface ChatInterfaceProps {
   isLoading: boolean;
+  cadContext: { did: string; wvm: string; wvmid: string; eid: string } | null;
+  onModelUpdated: () => void;
 }
 
 interface Message {
+  id: string;
   role: "user" | "assistant";
   text: string;
 }
 
-export default function ChatInterface({ isLoading }: ChatInterfaceProps) {
+const createMessage = (role: "user" | "assistant", text: string): Message => ({
+  id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  role,
+  text,
+});
+
+export default function ChatInterface({
+  isLoading,
+  cadContext,
+  onModelUpdated,
+}: Readonly<ChatInterfaceProps>) {
   const [input, setInput] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      text: "Click a broken face and tell me what to fix.",
-    },
+    createMessage(
+      "assistant",
+      "Describe what to change and I’ll handle the model update.",
+    ),
   ]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isEditing, setIsEditing] = useState<boolean>(false);
 
   // We explicitly namespace React.FormEvent here to avoid the global DOM collision
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!input.trim()) return;
 
     const userMsg = input;
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", text: userMsg }]);
+    setMessages((prev) => [...prev, createMessage("user", userMsg)]);
     setIsProcessing(true);
 
     try {
-      const response = await sendCopilotPrompt(userMsg);
+      if (!cadContext) {
+        throw new Error("Please import a CAD model first.");
+      }
+
+      const useCase = await loadUseCase();
+
+      // Step 1 & 2: Send chat to determine intent
+      const chatResponse = await fetch("http://localhost:8000/api/cad/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          did: cadContext.did,
+          wid: cadContext.wvmid, // Assuming wvmid is the workspace id
+          eid: cadContext.eid,
+          use_case: useCase || "",
+          user_message: userMsg,
+          chat_history: messages.map((m) => ({
+            role: m.role,
+            content: m.text,
+          })),
+        }),
+      });
+
+      if (!chatResponse.ok) {
+        throw new Error(`Backend error: ${chatResponse.status}`);
+      }
+
+      const chatData = await chatResponse.json();
+
+      // Step 6: Show confirmation message immediately
       setMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          text: response.message || "Modification applied.",
-        },
+        createMessage(
+          "assistant",
+          chatData.assistant_message || "I'm here to help.",
+        ),
       ]);
+
+      // Step 3, 4, 5: If intent is modify, trigger the modification agent
+      if (chatData.intent === "modify") {
+        setIsEditing(true);
+        const modifyResponse = await fetch(
+          "http://localhost:8000/api/cad/modify",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              did: cadContext.did,
+              wid: cadContext.wvmid,
+              eid: cadContext.eid,
+              use_case: useCase || "",
+              user_message: userMsg,
+              chat_history: messages.map((m) => ({
+                role: m.role,
+                content: m.text,
+              })),
+            }),
+          },
+        );
+
+        if (!modifyResponse.ok) {
+          throw new Error(`Modification failed: ${modifyResponse.status}`);
+        }
+
+        const modifyData = await modifyResponse.json();
+
+        // Show success message
+        setMessages((prev) => [
+          ...prev,
+          createMessage(
+            "assistant",
+            modifyData.message || "Modification applied successfully.",
+          ),
+        ]);
+
+        // Refetch the CAD model
+        onModelUpdated();
+      }
     } catch (err) {
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "Failed to apply modification. Please check constraints.";
       setMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          text: "Failed to apply modification. Please check constraints.",
-        },
+        createMessage("assistant", errorMessage),
       ]);
     } finally {
       setIsProcessing(false);
+      setIsEditing(false);
     }
   };
 
@@ -58,9 +144,9 @@ export default function ChatInterface({ isLoading }: ChatInterfaceProps) {
     <div className="chat-layout">
       <div className="messages-area">
         <AnimatePresence initial={false}>
-          {messages.map((msg, idx) => (
+          {messages.map((msg) => (
             <motion.div
-              key={idx}
+              key={msg.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               className={`message-row ${msg.role}`}
@@ -69,13 +155,30 @@ export default function ChatInterface({ isLoading }: ChatInterfaceProps) {
             </motion.div>
           ))}
 
-          {isProcessing && (
+          {isProcessing && !isEditing && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               className="message-row assistant"
             >
               <div className="message-bubble assistant">
+                <div className="typing-indicator">
+                  <span className="dot"></span>
+                  <span className="dot"></span>
+                  <span className="dot"></span>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {isEditing && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="message-row assistant"
+            >
+              <div className="message-bubble assistant editing-indicator">
+                <span className="editing-text">Editing model</span>
                 <div className="typing-indicator">
                   <span className="dot"></span>
                   <span className="dot"></span>
