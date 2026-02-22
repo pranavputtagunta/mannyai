@@ -12,7 +12,7 @@ dist
 dist-ssr
 *.local
 
-_agentfix_data/*
+_agentfix_data
 
 # Editor directories and files
 .vscode/*
