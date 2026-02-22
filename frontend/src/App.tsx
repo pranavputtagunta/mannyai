@@ -10,6 +10,7 @@ import type { SelectedGeometryDetails } from "./components/Lasso/LassoSelector";
 import type { ModelDimensions } from "./components/ModelStats";
 import type { Version } from "./components/VersionTimeline";
 import { uploadStep, getVersions, checkoutVersion } from "./services/api";
+import logo from "./assets/logo.png";
 import "./App.css";
 
 export default function App(): JSX.Element {
@@ -127,8 +128,17 @@ export default function App(): JSX.Element {
       {/* ── Sidebar ── */}
       <div className="sidebar">
         <div className="sidebar-header">
-          <h1 className="sidebar-title">Manny.AI</h1>
-          <p className="sidebar-subtitle">Handy Universal CAD Assistant</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <img
+              src={logo}
+              alt="Manny.AI"
+              style={{ width: 48, height: 48, borderRadius: "50%" }}
+            />
+            <div>
+              <h1 className="sidebar-title">Manny.AI</h1>
+              <p className="sidebar-subtitle">Handy Universal CAD Assistant</p>
+            </div>
+          </div>
 
           <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
             <input
