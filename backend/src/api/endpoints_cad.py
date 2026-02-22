@@ -30,3 +30,7 @@ async def run_featurescript(document_id: str, wvm: str, workspace_id: str, eleme
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to execute FeatureScript: {str(e)}")
+
+class ResolveSelectionRequest(BaseModel):
+    points_world: list[list[float]]  # [[x,y,z], ...]
+
