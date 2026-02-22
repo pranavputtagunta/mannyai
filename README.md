@@ -4,6 +4,7 @@
 > _"You break it, we fix it!"_
 
 A handy AI-powered CAD assistant that helps you modify and analyze 3D models.
+Demo: [View Demo](https://www.google.com/search?q=https://www.youtube.com/watch%3Fv%3DOcD2CKV3BeE)
 
 ## Installation
 
