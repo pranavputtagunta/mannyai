@@ -211,6 +211,17 @@ async def download_glb(model_id: str):
         _regen_preview(step_path)
     return FileResponse(str(glb_path), filename="preview.glb", media_type="model/gltf-binary")
 
+
+@router.get("/{model_id}/download/heatmap")
+async def download_heatmap(model_id: str):
+    """Download the heatmap-colored GLB file for analysis visualization."""
+    step_path = _require_model(model_id)
+    heatmap_path = step_path.parent / "heatmap.glb"
+    if not heatmap_path.exists():
+        raise HTTPException(404, "No heatmap analysis available. Run an analysis query first.")
+    return FileResponse(str(heatmap_path), filename="heatmap.glb", media_type="model/gltf-binary")
+
+
 @router.post("/{model_id}/save")
 async def save_checkpoint(model_id: str):
     step_path = _require_model(model_id)

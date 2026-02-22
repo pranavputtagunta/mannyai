@@ -47,18 +47,20 @@ export async function applyCadQueryFromText(
 
   const data = await res.json() as {
     status: string;
-    model_id?: string;
-    glb_url: string;
-    step_url: string;
     message?: string;
-    code?: string;
+    intent: string; // "modification" | "query" | "help" | "unknown"
+    code?: string | null;
+    glb_url?: string | null;
+    step_url?: string | null;
   };
 
   const t = Date.now();
-  const withBust = (u: string) =>
-    u.startsWith("http")
+  const withBust = (u: string | null | undefined) => {
+    if (!u) return null;
+    return u.startsWith("http")
       ? `${u}${u.includes("?") ? "&" : "?"}t=${t}`
       : `http://localhost:8000${u}${u.includes("?") ? "&" : "?"}t=${t}`;
+  };
 
   return {
     ...data,

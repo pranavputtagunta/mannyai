@@ -6,6 +6,8 @@ pydantic
 pydantic-settings
 cadquery
 trimesh
+numpy
+pyglet<2
 python-multipart
 openai
 gitpython

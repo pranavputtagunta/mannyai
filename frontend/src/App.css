@@ -24,6 +24,8 @@
   background-color: #0a0a0a; /* Neutral 950 */
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
   z-index: 10;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
 }

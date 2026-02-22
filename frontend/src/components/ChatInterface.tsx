@@ -36,7 +36,10 @@ export default function ChatInterface({
 }: ChatInterfaceProps): JSX.Element {
   const [input, setInput] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([
-    { role: "assistant", text: "Upload a STEP file, then tell me what to change." },
+    {
+      role: "assistant",
+      text: "Upload a STEP file, then tell me what to change.",
+    },
   ]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
@@ -52,7 +55,10 @@ export default function ChatInterface({
     if (!input.trim()) return;
 
     if (!modelId) {
-      setMessages((prev) => [...prev, { role: "assistant", text: "Upload a STEP file first." }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", text: "Upload a STEP file first." },
+      ]);
       return;
     }
 
@@ -64,11 +70,15 @@ export default function ChatInterface({
         ? ` (targeting ${selectedPoints.length} selected points)`
         : "";
 
-    setMessages((prev) => [...prev, { role: "user", text: userMsg + selectionNote }]);
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", text: userMsg + selectionNote },
+    ]);
     setIsProcessing(true);
 
     try {
-      // Pass fromVersion for version branching, selectedPoints for lasso targeting
+      // AI mode: backend classifies intent and routes to appropriate handler
+      // Pass from_version if editing from a previous version (triggers truncation)
       const fromVersion = isEditingFromPrevious ? viewingVersion : undefined;
       const res = await applyCadQueryFromText(
         modelId,
@@ -79,18 +89,23 @@ export default function ChatInterface({
 
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: res.message || "Modification applied." },
+        { role: "assistant", text: res.message || "Response received." },
       ]);
 
-      const glbUrl = toAbsoluteUrl(res.glb_url);
-      onModelUpdated(glbUrl);
+      // Only update the model view if this was a modification (glb_url present)
+      if (res.glb_url) {
+        const glbUrl = toAbsoluteUrl(res.glb_url);
+        onModelUpdated(glbUrl);
+      }
     } catch (err: any) {
       console.error(err);
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          text: err?.message || "Failed to apply modification. Check server logs for details.",
+          text:
+            err?.message ||
+            "Failed to apply modification. Check server logs for details.",
         },
       ]);
     } finally {
@@ -117,7 +132,10 @@ export default function ChatInterface({
           }}
         >
           <span>⬡</span>
-          <span>{selectedPoints.length} points selected — prompt will target this region</span>
+          <span>
+            {selectedPoints.length} points selected — prompt will target this
+            region
+          </span>
         </div>
       )}
 
