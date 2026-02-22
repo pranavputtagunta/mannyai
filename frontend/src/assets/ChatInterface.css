@@ -50,6 +50,39 @@
   border-top: 1px solid #262626;
 }
 
+.selection-context {
+  font-size: 0.75rem;
+  color: #93c5fd;
+  margin-bottom: 0.5rem;
+}
+
+.vertex-panel {
+  margin-bottom: 0.65rem;
+  border: 1px solid #262626;
+  border-radius: 0.5rem;
+  background-color: #171717;
+}
+
+.vertex-summary {
+  cursor: pointer;
+  color: #bfdbfe;
+  font-size: 0.75rem;
+  padding: 0.5rem 0.65rem;
+  user-select: none;
+}
+
+.vertex-json {
+  margin: 0;
+  max-height: 10rem;
+  overflow: auto;
+  border-top: 1px solid #262626;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: #dbeafe;
+  white-space: pre;
+}
+
 .input-form {
   position: relative;
   display: flex;

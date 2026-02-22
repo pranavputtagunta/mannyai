@@ -1,10 +1,13 @@
-import React, { useState } from "react";
+import React, { useState, type ReactElement } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { sendCopilotPrompt } from "../services/api";
+import { sendCopilotPrompt, type Coordinate } from "../services/api";
 import "../assets/ChatInterface.css";
 
 interface ChatInterfaceProps {
   isLoading: boolean;
+  selectedCoordinates: Coordinate | null;
+  selectedMode: "click" | "lasso" | "circle" | null;
+  onPromptCaptured: (prompt: string) => void;
 }
 
 interface Message {
@@ -14,12 +17,15 @@ interface Message {
 
 export default function ChatInterface({
   isLoading,
-}: ChatInterfaceProps): JSX.Element {
+  selectedCoordinates,
+  selectedMode,
+  onPromptCaptured,
+}: ChatInterfaceProps): ReactElement {
   const [input, setInput] = useState<string>("");
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      text: "Click a broken face and tell me what to fix.",
+      text: "Pick a region, then describe exactly what to change in this chat prompt. That prompt will be saved into the JSON intent.",
     },
   ]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -30,12 +36,13 @@ export default function ChatInterface({
     if (!input.trim()) return;
 
     const userMsg = input;
+    onPromptCaptured(userMsg);
     setInput("");
     setMessages((prev) => [...prev, { role: "user", text: userMsg }]);
     setIsProcessing(true);
 
     try {
-      const response = await sendCopilotPrompt(userMsg);
+      const response = await sendCopilotPrompt(userMsg, selectedCoordinates);
       setMessages((prev) => [
         ...prev,
         {
@@ -90,6 +97,13 @@ export default function ChatInterface({
       </div>
 
       <div className="input-container">
+        {selectedCoordinates && (
+          <div className="selection-context">
+            Using {selectedMode} selection at ({selectedCoordinates.x.toFixed(2)},{" "}
+            {selectedCoordinates.y.toFixed(2)}, {selectedCoordinates.z.toFixed(2)})
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="input-form">
           <input
             type="text"

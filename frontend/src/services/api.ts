@@ -14,7 +14,11 @@ export const fetchModelFromOnshape = async (
   const urlRegex =
     /\/documents\/([a-z0-9]+)\/([wvm])\/([a-z0-9]+)\/e\/([a-z0-9]+)/i;
   const match = onshapeUrl.match(urlRegex);
-  if (!match) throw new Error("Invalid Onshape URL format.");
+  if (!match) {
+    throw new Error(
+      "Invalid Onshape URL format. Use the full URL containing /documents/{did}/{wvm}/{wvmid}/e/{eid}.",
+    );
+  }
 
   const [_, did, wvm, wvmid, eid] = match;
 
@@ -24,7 +28,26 @@ export const fetchModelFromOnshape = async (
   const response = await fetch(apiUrl, {
     headers: { Accept: "application/json" },
   });
-  if (!response.ok) throw new Error(`Backend export error: ${response.status}`);
+
+  if (!response.ok) {
+    let backendDetail = "";
+
+    try {
+      const errorBody = await response.json();
+      backendDetail =
+        typeof errorBody?.detail === "string"
+          ? errorBody.detail
+          : JSON.stringify(errorBody);
+    } catch {
+      backendDetail = await response.text();
+    }
+
+    const message = backendDetail
+      ? `Model export failed (${response.status}): ${backendDetail}`
+      : `Model export failed (${response.status}).`;
+
+    throw new Error(message);
+  }
 
   const gltfJson = await response.json();
   const blob = new Blob([JSON.stringify(gltfJson)], {
@@ -38,9 +61,15 @@ export const sendCopilotPrompt = async (
   coordinates: Coordinate | null = null,
 ): Promise<any> => {
   try {
+    const regionSelectionRaw = localStorage.getItem("agentfix.regionSelectionForLlm");
+    const regionSelection = regionSelectionRaw
+      ? JSON.parse(regionSelectionRaw)
+      : null;
+
     const response = await axios.post(`${BACKEND_URL}/chat/prompt`, {
       prompt,
       coordinates,
+      region_selection: regionSelection,
     });
     return response.data;
   } catch (error) {

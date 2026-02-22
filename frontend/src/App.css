@@ -101,6 +101,46 @@
   background-color: #171717;
 }
 
+.selection-toolbar {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background-color: rgba(10, 10, 10, 0.88);
+  border: 1px solid #262626;
+  border-radius: 0.625rem;
+  padding: 0.5rem;
+}
+
+.selection-btn {
+  background-color: #171717;
+  color: #e5e5e5;
+  border: 1px solid #404040;
+  border-radius: 0.4rem;
+  padding: 0.375rem 0.625rem;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.selection-btn:hover {
+  border-color: #525252;
+}
+
+.selection-btn.active {
+  background-color: #2563eb;
+  border-color: #1d4ed8;
+  color: white;
+}
+
+.selection-meta {
+  color: #a3a3a3;
+  font-size: 0.75rem;
+  margin-left: 0.35rem;
+}
+
 .overlay {
   position: absolute;
   inset: 0;
