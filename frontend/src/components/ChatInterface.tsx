@@ -69,19 +69,21 @@ export default function ChatInterface({
     setIsProcessing(true);
 
     try {
-      // AI mode: backend generates CadQuery, applies it, returns glb_url/step_url
+      // AI mode: backend classifies intent and routes to appropriate handler
       // Pass from_version if editing from a previous version (triggers truncation)
       const fromVersion = isEditingFromPrevious ? viewingVersion : undefined;
       const res = await applyCadQueryFromText(modelId, userMsg, fromVersion);
 
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", text: res.message || "Modification applied." },
+        { role: "assistant", text: res.message || "Response received." },
       ]);
 
-      // ✅ FIX: turn whatever res.glb_url is into a clean absolute URL, and bust cache once
-      const glbUrl = toAbsoluteUrl(res.glb_url);
-      onModelUpdated(glbUrl);
+      // Only update the model view if this was a modification (glb_url present)
+      if (res.glb_url) {
+        const glbUrl = toAbsoluteUrl(res.glb_url);
+        onModelUpdated(glbUrl);
+      }
     } catch (err: any) {
       console.error(err);
       setMessages((prev) => [

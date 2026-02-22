@@ -39,9 +39,10 @@ class ChatPromptRequest(BaseModel):
 class ChatPromptResponse(BaseModel):
     status: str
     message: str
-    code: str
-    glb_url: str
-    step_url: str
+    intent: str = "modification"  # modification, query, help, unknown
+    code: str | None = None  # Only present for modifications
+    glb_url: str | None = None  # Only present for modifications
+    step_url: str | None = None  # Only present for modifications
     model_config = {"protected_namespaces": ()}
 
 
@@ -84,7 +85,208 @@ def _tlog(name: str, t0: float):
     print(f"[T] {name}: {time.time() - t0:.3f}s", flush=True)
 
 
-def _openai_generate_cadquery(prompt: str, params: Dict[str, Any]) -> str:
+def _get_chat_history_for_prompt(model_id: str, max_messages: int = 10) -> str:
+    """
+    Format recent chat history for inclusion in agent prompts.
+    Returns a formatted string of the conversation.
+    """
+    messages = chat_histories.get(model_id, [])
+    if not messages:
+        return "No previous conversation."
+    
+    # Get the most recent messages (excluding the current one being processed)
+    recent = messages[-max_messages:]
+    
+    formatted = []
+    for msg in recent:
+        role = "User" if msg["role"] == "user" else "Assistant"
+        formatted.append(f"{role}: {msg['content']}")
+    
+    return "\n\n".join(formatted) if formatted else "No previous conversation."
+
+
+# ============== INTENT CLASSIFICATION ==============
+
+class IntentType:
+    MODIFICATION = "modification"
+    QUERY = "query"
+    HELP = "help"
+    UNKNOWN = "unknown"
+
+
+def _classify_intent(prompt: str, model_id: str) -> Dict[str, Any]:
+    """
+    Classify the user's intent using an LLM.
+    Returns the intent type and any extracted parameters.
+    Includes chat history for context.
+    """
+    chat_history = _get_chat_history_for_prompt(model_id, max_messages=6)
+    schema = {
+        "type": "object",
+        "properties": {
+            "intent": {
+                "type": "string",
+                "enum": ["modification", "query", "help", "unknown"]
+            },
+            "confidence": {
+                "type": "number"
+            },
+            "reasoning": {
+                "type": "string"
+            }
+        },
+        "required": ["intent", "confidence", "reasoning"],
+        "additionalProperties": False,
+    }
+
+    system = """
+You are an intent classifier for a CAD (Computer-Aided Design) assistant.
+
+Classify the user's message into ONE of these categories:
+
+1. "modification" - User wants to CHANGE the 3D model. Examples:
+   - "Add a hole in the center"
+   - "Scale the model by 2x"
+   - "Cut a slot on the top"
+   - "Make it taller"
+   - "Round the edges"
+
+2. "query" - User is ASKING about the model or wants information. Examples:
+   - "What are the dimensions?"
+   - "How big is this?"
+   - "What is the volume?"
+   - "Describe this model"
+   - "What material should I use?"
+
+3. "help" - User needs help with the tool or is confused. Examples:
+   - "What can you do?"
+   - "How do I use this?"
+   - "Help"
+   - "What commands are available?"
+
+4. "unknown" - Message doesn't fit the above categories clearly.
+
+Use the conversation history to understand context (e.g., "make it bigger" refers to previous discussion).
+
+OUTPUT JSON ONLY with intent, confidence (0-1), and brief reasoning.
+""".strip()
+
+    user_message = f"""
+Conversation history:
+{chat_history}
+
+Current message to classify:
+{prompt}
+""".strip()
+
+    try:
+        resp = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_message}
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "IntentClassification",
+                    "schema": schema,
+                    "strict": True,
+                }
+            },
+        )
+
+        raw = resp.choices[0].message.content
+        if not raw:
+            return {"intent": IntentType.UNKNOWN, "confidence": 0.0, "reasoning": "Empty response"}
+        
+        data = json.loads(raw)
+        print(f"[INTENT] {data['intent']} (conf: {data['confidence']:.2f}) - {data['reasoning']}", flush=True)
+        return data
+    except Exception as e:
+        print(f"[INTENT ERROR] {e}", flush=True)
+        return {"intent": IntentType.UNKNOWN, "confidence": 0.0, "reasoning": str(e)}
+
+
+def _handle_query(prompt: str, model_id: str, step_path: str) -> str:
+    """
+    Handle a query about the model - analyze it and respond with information.
+    Includes chat history for context.
+    """
+    chat_history = _get_chat_history_for_prompt(model_id, max_messages=8)
+    
+    # Load the model to get its properties
+    try:
+        model = cq.importers.importStep(step_path)
+        bb = model.val().BoundingBox()
+        
+        model_info = f"""
+Model dimensions:
+- Width (X): {bb.xlen:.2f} mm
+- Depth (Y): {bb.ylen:.2f} mm  
+- Height (Z): {bb.zlen:.2f} mm
+- Bounding box: ({bb.xmin:.2f}, {bb.ymin:.2f}, {bb.zmin:.2f}) to ({bb.xmax:.2f}, {bb.ymax:.2f}, {bb.zmax:.2f})
+""".strip()
+    except Exception as e:
+        model_info = f"Could not analyze model: {e}"
+
+    system = f"""
+You are a helpful CAD assistant. The user is asking about their 3D model.
+
+Current model information:
+{model_info}
+
+Conversation history:
+{chat_history}
+
+Answer the user's question concisely based on the model information and conversation context.
+If you cannot answer based on available data, explain what information is missing.
+""".strip()
+
+    try:
+        resp = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt}
+            ],
+        )
+        return resp.choices[0].message.content or "I couldn't generate a response."
+    except Exception as e:
+        return f"Error processing query: {e}"
+
+
+def _handle_help() -> str:
+    """Return help information about available commands."""
+    return """I can help you with your CAD model! Here's what I can do:
+
+**Modifications** - Tell me to change the model:
+• "Add a hole in the center"
+• "Scale the model by 1.5x"
+• "Fillet the edges with 2mm radius"
+• "Cut a rectangular slot on top"
+
+**Queries** - Ask me about the model:
+• "What are the dimensions?"
+• "How tall is this?"
+
+**Tips**:
+• Be specific about sizes (use millimeters)
+• Mention locations (top, bottom, center, etc.)
+• I'll show you the generated code after each modification
+
+What would you like to do?"""
+
+
+# ============== MODIFICATION AGENT ==============
+
+def _openai_generate_cadquery(prompt: str, params: Dict[str, Any], model_id: str) -> str:
+    """
+    Generate CadQuery code for a modification request.
+    Includes chat history for context.
+    """
+    chat_history = _get_chat_history_for_prompt(model_id, max_messages=8)
+    
     schema = {
         "type": "object",
         "properties": {"code": {"type": "string"}},
@@ -92,10 +294,10 @@ def _openai_generate_cadquery(prompt: str, params: Dict[str, Any]) -> str:
         "additionalProperties": False,
     }
 
-    system = """
+    system = f"""
 You are a CAD automation engineer using CadQuery (Python).
 
-OUTPUT JSON ONLY: {"code": "..."} (no markdown).
+OUTPUT JSON ONLY: {{"code": "..."}} (no markdown).
 
 You MUST define EXACTLY this function:
 
@@ -111,6 +313,9 @@ RULES:
 - You MUST make a visible change. If the request is "add X", it must be unioned to the model.
 - ALWAYS union onto the original model (never forget to combine).
 - If params does not provide a placement point, you MUST place new geometry at the model's bounding box top center + a small offset so it is visible.
+
+Conversation history (for context on what the user has been working on):
+{chat_history}
 """.strip()
 
     user = f"""
@@ -239,6 +444,60 @@ async def chat_prompt(req: ChatPromptRequest):
     step_path = _require_model(req.model_id)
     model_dir = step_path.parent
 
+    # ============== INTENT CLASSIFICATION ==============
+    t_classify = time.time()
+    intent_result = _classify_intent(req.prompt, req.model_id)
+    intent = intent_result["intent"]
+    _tlog("classify_intent", t_classify)
+
+    # ============== ROUTE BY INTENT ==============
+    
+    # Handle HELP intent
+    if intent == IntentType.HELP:
+        help_message = _handle_help()
+        _add_to_history(req.model_id, "assistant", help_message)
+        return {
+            "status": "success",
+            "message": help_message,
+            "intent": "help",
+            "code": None,
+            "glb_url": None,
+            "step_url": None,
+        }
+    
+    # Handle QUERY intent
+    if intent == IntentType.QUERY:
+        query_response = _handle_query(req.prompt, req.model_id, str(step_path))
+        _add_to_history(req.model_id, "assistant", query_response)
+        return {
+            "status": "success",
+            "message": query_response,
+            "intent": "query",
+            "code": None,
+            "glb_url": None,
+            "step_url": None,
+        }
+    
+    # Handle UNKNOWN intent - try to be helpful
+    if intent == IntentType.UNKNOWN and intent_result["confidence"] < 0.5:
+        unclear_message = (
+            "I'm not sure what you'd like me to do. "
+            "Try asking me to modify the model (e.g., 'add a hole') "
+            "or ask a question about it (e.g., 'what are the dimensions?')."
+        )
+        _add_to_history(req.model_id, "assistant", unclear_message)
+        return {
+            "status": "success",
+            "message": unclear_message,
+            "intent": "unknown",
+            "code": None,
+            "glb_url": None,
+            "step_url": None,
+        }
+
+    # ============== MODIFICATION INTENT ==============
+    # Fall through for modification or high-confidence unknown
+
     MAX_RETRIES = 3
     last_err = "Unknown"
     last_code = ""
@@ -247,7 +506,7 @@ async def chat_prompt(req: ChatPromptRequest):
         try:
             # 1) Generate CadQuery code
             t0 = time.time()
-            last_code = _openai_generate_cadquery(req.prompt, req.params)  # ← fixed: pass params
+            last_code = _openai_generate_cadquery(req.prompt, req.params, req.model_id)
             _tlog("openai_generate", t0)
 
             # 2) Execute AI CadQuery
@@ -339,6 +598,7 @@ async def chat_prompt(req: ChatPromptRequest):
             return {
                 "status": "success",
                 "message": assistant_message,
+                "intent": "modification",
                 "code": last_code,
                 "glb_url": f"/api/cad/{req.model_id}/download/glb",
                 "step_url": f"/api/cad/{req.model_id}/download/step",
