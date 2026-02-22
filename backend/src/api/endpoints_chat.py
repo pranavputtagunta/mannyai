@@ -21,7 +21,8 @@ from core.config import settings
 
 router = APIRouter()
 
-client = OpenAI(api_key=settings.OPENAI_API_KEY)
+API_KEY = ""
+client = OpenAI(api_key=API_KEY)
 
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
 
@@ -76,8 +77,9 @@ class RevertRequest(BaseModel):
 
 
 def _bbox_sig(wp: cq.Workplane):
-    bb = wp.val().BoundingBox()
-    return (round(bb.xlen, 3), round(bb.ylen, 3), round(bb.zlen, 3))
+    solid = wp.val()
+    # Rounding to 3 decimals handles floating point jitter
+    return (round(solid.Volume(), 3), round(solid.Area(), 3))
 
 
 def _tlog(name: str, t0: float):
@@ -108,9 +110,36 @@ RULES:
 - Do NOT read/write files.
 - Use ONLY CadQuery via `cq` and the passed `model`.
 - Units are millimeters.
-- You MUST make a visible change. If the request is "add X", it must be unioned to the model.
-- ALWAYS union onto the original model (never forget to combine).
-- If params does not provide a placement point, you MUST place new geometry at the model's bounding box top center + a small offset so it is visible.
+- ALWAYS return a modified model — never return the original unchanged.
+- ALWAYS union/cut onto the original model.
+
+TARGETING SPECIFIC GEOMETRY (If params contains 'selection_summary'):
+When the user asks to modify a selected area (e.g., "round this edge", "chamfer here"), use this exact pattern to isolate the selected edges or faces:
+
+  cx, cy, cz = params["selection_summary"]["centroid"]
+  xmin, xmax = params["selection_summary"]["x_range"]
+  ymin, ymax = params["selection_summary"]["y_range"]
+  zmin, zmax = params["selection_summary"]["z_range"]
+  
+  # Expand the bounding box slightly to guarantee we catch the targeted topological entities
+  pad = 5.0
+  target_edges = model.edges(
+      cq.selectors.BoxSelector(
+          (xmin - pad, ymin - pad, zmin - pad),
+          (xmax + pad, ymax + pad, zmax + pad)
+      )
+  )
+  
+  if len(target_edges.vals()) == 0:
+      # Fallback: If the bounding box misses, apply a small safe operation to the whole model
+      return model.edges().fillet(1.0) # Adjust fallback operation to match user intent
+  
+  # CRITICAL: Apply the user's requested operation to target_edges here. 
+  # DO NOT blindly use 2.0. Extract the operation (fillet/chamfer) and radius/length from the user's prompt.
+  # Example: return target_edges.fillet(5.0) 
+  
+FOR ADD/SUBTRACT operations without selection:
+Place geometry at the bounding box top center or origin depending on the request.
 """.strip()
 
     user = f"""
@@ -239,6 +268,21 @@ async def chat_prompt(req: ChatPromptRequest):
     step_path = _require_model(req.model_id)
     model_dir = step_path.parent
 
+    if req.params.get("selection"):
+        pts = req.params["selection"]
+        if pts and len(pts) > 0:
+            xs = [p[0] for p in pts]
+            ys = [p[1] for p in pts]
+            zs = [p[2] for p in pts]
+            req.params["selection_summary"] = {
+                "point_count": len(pts),
+                "centroid": [round(sum(xs)/len(xs), 3), round(sum(ys)/len(ys), 3), round(sum(zs)/len(zs), 3)],
+                "x_range": [round(min(xs), 3), round(max(xs), 3)],
+                "y_range": [round(min(ys), 3), round(max(ys), 3)],
+                "z_range": [round(min(zs), 3), round(max(zs), 3)],
+            }
+            del req.params["selection"]  # ← never send raw points to LLM
+
     MAX_RETRIES = 3
     last_err = "Unknown"
     last_code = ""
@@ -276,6 +320,16 @@ async def chat_prompt(req: ChatPromptRequest):
             # 5) Verify geometry changed
             before = _bbox_sig(cq.importers.importStep(str(step_path)))
             after  = _bbox_sig(result_model)
+
+            if before == after:
+                last_err = "Model volume and area did not change. The modification had no visible effect."
+                req.prompt = (
+                    f"{req.prompt}\n\n"
+                    f"Your previous attempt produced no change to the model's volume or area.\n"
+                    f"You MUST make a visible modification. Try a different approach.\n"
+                    f"Ensure your BoxSelector is targeting the right geometry."
+                )
+                continue
             print("[SIG] before:", before, "after:", after, flush=True)
 
             # 6) Export preview
