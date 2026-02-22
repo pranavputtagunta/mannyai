@@ -67,7 +67,7 @@ def _stl_to_glb(stl_path: Path, glb_path: Path) -> None:
 
         if isinstance(mesh, trimesh.Scene):
             mesh = trimesh.util.concatenate([g for g in mesh.geometry.values()])
-
+            
         glb_path.write_bytes(trimesh.exchange.gltf.export_glb(mesh))
     except Exception as e:
         raise HTTPException(500, f"Failed STL->GLB: {e}")

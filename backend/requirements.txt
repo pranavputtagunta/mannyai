@@ -4,3 +4,7 @@ requests
 python-dotenv
 pydantic
 pydantic-settings
+cadquery
+trimesh
+python-multipart
+openai

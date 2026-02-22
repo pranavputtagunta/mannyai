@@ -15,10 +15,11 @@ import cadquery as cq
 from api.endpoints_cad import _require_model, _export_step, _export_stl, _stl_to_glb
 from services.cq_ai_exec import run_ai_cadquery
 
+from core.config import settings
+
 router = APIRouter()
 
-API_KEY = ""
-client = OpenAI(api_key=API_KEY)
+client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
 
