@@ -105,6 +105,43 @@ def _load_cadquery_database() -> str:
                 db_text += f"\n--- REFERENCE SCRIPT: {filename} ---\n{content}\n"
     return db_text
 
+def _enhance_prompt(prompt: str, chat_history: str) -> str:
+    """
+    Acts as a Senior Mechanical Engineer. Translates vague user prompts 
+    into strict geometric steps before sending them to the code generator.
+    """
+    system = """
+    You are a Senior Mechanical Engineer. The user is going to give you a request for a 3D model.
+    Your job is to translate their request into a highly specific, step-by-step geometric blueprint for a CadQuery programmer.
+
+    If the prompt is simple (e.g., "Add a 5mm hole"), just repeat it clearly.
+    If the prompt is complex (e.g., "make a realistic 2 cylinder engine"), break it down into primitive geometric steps:
+    1. Base shapes (boxes, cylinders) with estimated reasonable dimensions in millimeters.
+    2. Specific boolean operations (cut, union).
+    3. Placements (top face, center, offset by X).
+    4. Advanced features (lofts for curves, shells for hollowing).
+    
+    WARNING: Keep the design achievable. Do not design hundreds of microscopic parts. 
+    Focus on the macro-structure that looks like the requested object.
+
+    OUTPUT PLAIN TEXT ONLY. No code. Provide the step-by-step geometric blueprint.
+    """.strip()
+
+    user_message = f"Chat History:\n{chat_history}\n\nUser Request:\n{prompt}"
+
+    try:
+        resp = client.chat.completions.create(
+            model=OPENAI_MODEL,  # You can use a cheaper model like gpt-4o-mini here if you want to save money
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_message}
+            ]
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"[ENHANCER ERROR] {e}", flush=True)
+        return prompt  # Fallback to the original prompt if it fails
+    
 def _get_chat_history_for_prompt(model_id: str, max_messages: int = 10) -> str:
     """
     Format recent chat history for inclusion in agent prompts.
@@ -683,46 +720,28 @@ RULES:
 - ALWAYS return a modified model. 
 - DEFAULT BEHAVIOR: Boolean (union/cut) your new features onto the original model.
 - REPLACEMENT BEHAVIOR: If the user explicitly asks to "replace" or "clear" the model, DO NOT boolean. Create a brand new `cq.Workplane` and return it as the final output.
+- ANTI-CRASH RULE (FILLETS): To prevent 'ChFi3d_Builder' crashes, DO NOT use `.fillet()` or `.chamfer()` when generating complex models (like engines) from scratch. Keep edges sharp.
+
+CADQUERY API DOCUMENTATION REFERENCE (CRITICAL):
+Do not hallucinate keyword arguments. Always check this API reference before using a method:
+- `.extrude(distance: float, combine: bool = True, clean: bool = True, both: bool = False, taper: float = None)` 
+  *ERROR TRAP: `extrude()` DOES NOT have a `centered` argument! If you want symmetric extrusion, use `both=True` and half the distance.*
+- `.box(length, width, height, centered=(True, True, True), combine=True)`
+- `.cylinder(height, radius, direct=(0,0,1), centered=(True, True, True), combine=True)`
+- `.hole(diameter, depth=None, clean=True)`
+- `.cutBlind(distance: float)` / `.cutThruAll()`
+- `.pushPoints(pts: list of tuples)` -> Used to place multiple items (like holes or cylinders) at once.
 
 UNIVERSAL ADVANCED CAD TECHNIQUES:
-- **Lofting (Boats, Wings, Organic Shapes):** To avoid "More than one wire required" errors, you MUST chain `.workplane(offset=X)` directly with drawing commands before calling `.loft()`.
-  `boat = cq.Workplane("XY").rect(20, 10).workplane(offset=10).ellipse(15, 8).workplane(offset=10).circle(2).loft()`
-- **Sweeping (Pipes, Tubes):** Draw a path, then a profile, then sweep.
-  `path = cq.Workplane("XZ").spline([(0,0), (10,10), (20,0)])`
-  `pipe = cq.Workplane("XY").circle(2).sweep(path)`
-- **Shelling (Hollowing objects):** `hollow_boat = boat.faces(">Z").shell(-1.5)`
+- **Lofting:** You MUST chain `.workplane(offset=X)` directly with drawing commands before calling `.loft()`.
+- **Sweeping:** Draw a path, then a profile, then sweep.
+- **Shelling:** `hollow_boat = boat.faces(">Z").shell(-1.5)`
 
 DATABASE OF ADVANCED CADQUERY EXAMPLES:
 Study these scripts. Use their syntax and techniques to fulfill the user's request.
 {cq_database}
 
-TARGETING GEOMETRY (If params contains 'selection_summary'):
-  cx, cy, cz = params["selection_summary"]["centroid"]
-  xmin, xmax = params["selection_summary"]["x_range"]
-  ymin, ymax = params["selection_summary"]["y_range"]
-  zmin, zmax = params["selection_summary"]["z_range"]
-  
-  pad = 5.0
-  target_edges = model.edges(
-      cq.selectors.BoxSelector(
-          (xmin - pad, ymin - pad, zmin - pad),
-          (xmax + pad, ymax + pad, zmax + pad)
-      )
-  )
-  
-  if len(target_edges.vals()) == 0:
-      # Fallback: If the bounding box misses, apply a small safe operation to the whole model
-      return model.edges().fillet(1.0) # Adjust fallback operation to match user intent
-  
-  # CRITICAL: Apply the user's requested operation to target_edges here. 
-  # DO NOT blindly use 2.0. Extract the operation (fillet/chamfer) and radius/length from the user's prompt.
-  # Example: return target_edges.fillet(5.0) 
-  
-FOR ADD/SUBTRACT operations without selection:
-Place geometry at the bounding box top center or origin depending on the request.
-
-Conversation history (for context on what the user has been working on):
-{chat_history}
+# ... (Keep the rest of your TARGETING GEOMETRY and Conversation history sections the same) ...
 """.strip()
 
     user = f"User request:\n{prompt}\n\nparams JSON:\n{json.dumps(params, indent=2)}"
@@ -941,6 +960,14 @@ async def chat_prompt(req: ChatPromptRequest):
             }
             del req.params["selection"]  # ← never send raw points to LLM
 
+    t_enhance = time.time()
+    chat_history_str = _get_chat_history_for_prompt(req.model_id, max_messages=4)
+    enhanced_blueprint = _enhance_prompt(req.prompt, chat_history_str)
+
+    safe_blueprint = enhanced_blueprint.encode('ascii', 'replace').decode('ascii')
+    print(f"\n[ENHANCED BLUEPRINT]\n{safe_blueprint}\n", flush=True)
+    _tlog("enhance_prompt", t_enhance)
+
     MAX_RETRIES = 3
     last_err = "Unknown"
     last_code = ""
@@ -949,7 +976,8 @@ async def chat_prompt(req: ChatPromptRequest):
         try:
             # 1) Generate CadQuery code
             t0 = time.time()
-            last_code = _openai_generate_cadquery(req.prompt, req.params, req.model_id)
+            coder_prompt = f"USER INTENT: {req.prompt}\n\nSTRICT GEOMETRIC BLUEPRINT TO FOLLOW:\n{enhanced_blueprint}"
+            last_code = _openai_generate_cadquery(coder_prompt, req.params, req.model_id)
             _tlog("openai_generate", t0)
 
             # 2) Execute AI CadQuery
