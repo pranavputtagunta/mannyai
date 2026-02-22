@@ -6,7 +6,7 @@ import os
 import time
 from datetime import datetime
 from typing import Any, Dict, List
-
+import glob
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from openai import OpenAI
@@ -24,7 +24,7 @@ router = APIRouter()
 API_KEY = ""
 client = OpenAI(api_key=API_KEY)
 
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "o3-mini")
 
 # In-memory chat history storage (keyed by model_id)
 chat_histories: Dict[str, List[Dict[str, Any]]] = {}
@@ -86,69 +86,77 @@ def _tlog(name: str, t0: float):
     print(f"[T] {name}: {time.time() - t0:.3f}s", flush=True)
 
 
+def _load_cadquery_database() -> str:
+    """Reads all Python scripts from the cad_examples folder to use as reference."""
+    examples_dir = os.path.join(os.path.dirname(__file__), "..", "cad_examples")
+    db_text = ""
+    
+    # Check if folder exists and grab all .py files
+    if os.path.exists(examples_dir):
+        for filepath in glob.glob(os.path.join(examples_dir, "*.py")):
+            filename = os.path.basename(filepath)
+            with open(filepath, "r", encoding="utf-8") as f:
+                content = f.read()
+                db_text += f"\n--- REFERENCE SCRIPT: {filename} ---\n{content}\n"
+    return db_text
+
 def _openai_generate_cadquery(prompt: str, params: Dict[str, Any]) -> str:
     schema = {
         "type": "object",
-        "properties": {"code": {"type": "string"}},
-        "required": ["code"],
+        "properties": {
+            "thought_process": {
+                "type": "string",
+                "description": "Plan the geometry. Which reference script techniques will you use?"
+            },
+            "code": {"type": "string"}
+        },
+        "required": ["thought_process", "code"],
         "additionalProperties": False,
     }
 
-    system = """
-You are a CAD automation engineer using CadQuery (Python).
+    # Load the cadquery-contrib scripts!
+    cq_database = _load_cadquery_database()
 
-OUTPUT JSON ONLY: {"code": "..."} (no markdown).
+    system = f"""
+You are a master CAD automation engineer using CadQuery (Python).
+
+OUTPUT JSON ONLY. Plan your geometry in `thought_process`, then output the `code`.
 
 You MUST define EXACTLY this function:
-
 def modify(model: cq.Workplane, *, params: dict) -> cq.Workplane:
     ...
     return out
 
 RULES:
-- Do NOT import anything.
-- Do NOT read/write files.
-- Use ONLY CadQuery via `cq` and the passed `model`.
+- Do NOT import anything. `math` and `cq` are available in the global namespace. 
 - Units are millimeters.
-- ALWAYS return a modified model — never return the original unchanged.
-- ALWAYS union/cut onto the original model.
+- ALWAYS return a modified model. 
+- DEFAULT BEHAVIOR: Boolean (union/cut) your new features onto the original model.
+- REPLACEMENT BEHAVIOR: If the user explicitly asks to "replace" or "clear" the model, DO NOT boolean. Create a brand new `cq.Workplane` and return it as the final output.
 
-TARGETING SPECIFIC GEOMETRY (If params contains 'selection_summary'):
-When the user asks to modify a selected area (e.g., "round this edge", "chamfer here"), use this exact pattern to isolate the selected edges or faces:
+UNIVERSAL ADVANCED CAD TECHNIQUES:
+- **Lofting (Boats, Wings, Organic Shapes):** To avoid "More than one wire required" errors, you MUST chain `.workplane(offset=X)` directly with drawing commands before calling `.loft()`.
+  `boat = cq.Workplane("XY").rect(20, 10).workplane(offset=10).ellipse(15, 8).workplane(offset=10).circle(2).loft()`
+- **Sweeping (Pipes, Tubes):** Draw a path, then a profile, then sweep.
+  `path = cq.Workplane("XZ").spline([(0,0), (10,10), (20,0)])`
+  `pipe = cq.Workplane("XY").circle(2).sweep(path)`
+- **Shelling (Hollowing objects):** `hollow_boat = boat.faces(">Z").shell(-1.5)`
 
+DATABASE OF ADVANCED CADQUERY EXAMPLES:
+Study these scripts. Use their syntax and techniques to fulfill the user's request.
+{cq_database}
+
+TARGETING GEOMETRY (If params contains 'selection_summary'):
   cx, cy, cz = params["selection_summary"]["centroid"]
   xmin, xmax = params["selection_summary"]["x_range"]
   ymin, ymax = params["selection_summary"]["y_range"]
   zmin, zmax = params["selection_summary"]["z_range"]
   
-  # Expand the bounding box slightly to guarantee we catch the targeted topological entities
   pad = 5.0
-  target_edges = model.edges(
-      cq.selectors.BoxSelector(
-          (xmin - pad, ymin - pad, zmin - pad),
-          (xmax + pad, ymax + pad, zmax + pad)
-      )
-  )
-  
-  if len(target_edges.vals()) == 0:
-      # Fallback: If the bounding box misses, apply a small safe operation to the whole model
-      return model.edges().fillet(1.0) # Adjust fallback operation to match user intent
-  
-  # CRITICAL: Apply the user's requested operation to target_edges here. 
-  # DO NOT blindly use 2.0. Extract the operation (fillet/chamfer) and radius/length from the user's prompt.
-  # Example: return target_edges.fillet(5.0) 
-  
-FOR ADD/SUBTRACT operations without selection:
-Place geometry at the bounding box top center or origin depending on the request.
+  target_edges = model.edges(cq.selectors.BoxSelector((xmin-pad, ymin-pad, zmin-pad), (xmax+pad, ymax+pad, zmax+pad)))
 """.strip()
 
-    user = f"""
-User request:
-{prompt}
-
-params JSON:
-{json.dumps(params, indent=2)}
-""".strip()
+    user = f"User request:\n{prompt}\n\nparams JSON:\n{json.dumps(params, indent=2)}"
 
     resp = client.chat.completions.create(
         model=OPENAI_MODEL,
@@ -167,12 +175,15 @@ params JSON:
     )
 
     raw = resp.choices[0].message.content
-    if not raw:
-        raise RuntimeError("OpenAI returned empty response.")
-
     data = json.loads(raw)
+    
+    # ---------------------------------------------------------
+    # FIX: Safely encode/decode to prevent Windows charmap crash
+    # ---------------------------------------------------------
+    safe_thought = data['thought_process'].encode('ascii', 'replace').decode('ascii')
+    print(f"\n[AI THOUGHT PROCESS]\n{safe_thought}\n", flush=True)
+    
     return data["code"].strip()
-
 
 def _add_to_history(model_id: str, role: str, content: str):
     """Add a message to the chat history for a model."""
@@ -400,10 +411,18 @@ async def chat_prompt(req: ChatPromptRequest):
 
         except Exception as e:
             last_err = str(e)
-            print(f"[ERR] Attempt {attempt + 1} failed: {last_err}", flush=True)
+            # ---------------------------------------------------------
+            # FIX: Safely encode/decode errors during the retry loop
+            # ---------------------------------------------------------
+            safe_err = last_err.encode('ascii', 'replace').decode('ascii')
+            print(f"[ERR] Attempt {attempt + 1} failed: {safe_err}", flush=True)
 
     # Store error response in history
-    error_message = f"Failed after {MAX_RETRIES} attempts. Last error: {last_err}"
+    # ---------------------------------------------------------
+    # FIX: Safely output final error string
+    # ---------------------------------------------------------
+    safe_final_err = last_err.encode('ascii', 'replace').decode('ascii')
+    error_message = f"Failed after {MAX_RETRIES} attempts. Last error: {safe_final_err}"
     _add_to_history(req.model_id, "assistant", error_message)
 
     raise HTTPException(

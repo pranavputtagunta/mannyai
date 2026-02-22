@@ -5,7 +5,7 @@ import multiprocessing as mp
 import tempfile
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
-
+import math
 import cadquery as cq
 
 
@@ -22,13 +22,15 @@ def _worker(code: str, step_path: str, params: Dict[str, Any], q: mp.Queue):
 
         safe_globals: Dict[str, Any] = {
             "__builtins__": {
+                "__import__": __import__,  # <--- CRITICAL FIX: Allows Python to parse 'import' without crashing
                 "abs": abs, "min": min, "max": max, "sum": sum, "len": len,
-                "range": range, "enumerate": enumerate,
+                "range": range, "enumerate": enumerate, "zip": zip,
                 "float": float, "int": int, "str": str, "bool": bool,
                 "dict": dict, "list": list, "set": set, "tuple": tuple,
-                "print": print,
+                "print": print, "round": round,
             },
             "cq": cq,
+            "math": math
         }
 
         local_env: Dict[str, Any] = {}
