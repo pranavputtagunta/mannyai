@@ -117,7 +117,3 @@ We learned that building a successful AI engineering tool for startups requires 
 ## What's next for Manny.ai
 
 Our next step is moving toward **Simulation-Driven Design**. We plan to integrate a full FEA (Finite Element Analysis) suite so Manny can not only suggest changes but prove they work through stress testing and thermal analysis. We are also exploring **Multi-User Collaborative CAD**, allowing entire teams to iterate on a single STEP file simultaneously in a shared environment—the "Google Docs of Hardware."
-
----
-
-Would you like me to help you draft a sample `requirements.txt` for the backend to ensure your CadQuery and OpenCASCADE environment is correctly configured?
